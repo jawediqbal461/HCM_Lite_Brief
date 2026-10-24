@@ -1,0 +1,20 @@
+# Secrets — only .env.example belongs in git
+.env
+.env.local
+
+# Local databases
+*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Editor / tooling local state
+.claude/scheduled_tasks.lock
+.DS_Store

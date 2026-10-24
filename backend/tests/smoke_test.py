@@ -1,0 +1,432 @@
+"""End-to-end smoke test for HCM Lite.
+
+Walks the whole demo script against a throwaway SQLite database — first-run setup,
+HR and employee logins, check-in/out, leave apply/approve, payroll run and finalize,
+payslip PDF — then asserts the role boundaries (an Employee must not reach other
+people's data, including through the AI tools), the analytics maths, and a few
+regressions we have already been bitten by.
+
+Run it from anywhere:    python backend/tests/smoke_test.py
+No database server and no AI key required; it runs fully offline.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+DB_PATH = Path(__file__).resolve().parent / "smoke_test.db"
+
+# Must be set before app.core.config is imported.
+os.environ["DATABASE_URL"] = f"sqlite:///{DB_PATH.as_posix()}"
+os.environ["JWT_SECRET"] = "test-secret"
+os.environ["AI_API_KEY"] = ""  # empty: the AI layer must degrade gracefully, not call out
+
+sys.path.insert(0, str(BACKEND_ROOT))
+
+if DB_PATH.exists():
+    DB_PATH.unlink()
+
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+client.__enter__()
+
+
+def check(label, resp, expect=200):
+    ok = resp.status_code == expect
+    print(f"{'OK' if ok else 'FAIL'} {label}: {resp.status_code}", "" if ok else resp.text[:300])
+    assert ok, f"{label} failed: {resp.status_code} {resp.text}"
+    return resp.json() if resp.content else None
+
+
+# 1. first-run status
+d = check("first-run-status", client.get("/auth/first-run-status"))
+assert d["first_run"] is True
+
+# 2. first-run setup
+d = check(
+    "first-run-setup",
+    client.post(
+        "/auth/first-run-setup",
+        json={"company_name": "Acme Corp", "admin_email": "admin@acme.com", "admin_password": "AdminPass123"},
+    ),
+)
+admin_token = d["access_token"]
+admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+# 3. company settings
+d = check("get settings", client.get("/org/settings", headers=admin_headers))
+check(
+    "update settings",
+    client.put(
+        "/org/settings",
+        headers=admin_headers,
+        json={"office_lat": 24.86, "office_lng": 67.0, "office_radius_m": 200},
+    ),
+)
+
+# 4. department
+d = check("create dept", client.post("/org/departments", headers=admin_headers, json={"name": "Engineering"}))
+dept_id = d["id"]
+
+# 5. create HR login
+d = check(
+    "create hr",
+    client.post(
+        "/org/hr-users",
+        headers=admin_headers,
+        json={"full_name": "HR Person", "email": "hr@acme.com", "password": "HrPass123"},
+    ),
+)
+
+# 6. HR login
+d = check("hr login", client.post("/auth/login", json={"email": "hr@acme.com", "password": "HrPass123"}))
+hr_token = d["access_token"]
+hr_headers = {"Authorization": f"Bearer {hr_token}"}
+assert d["must_change_password"] is True
+
+check(
+    "hr change password",
+    client.post("/auth/change-password", headers=hr_headers, json={"old_password": "HrPass123", "new_password": "HrPass456!"}),
+)
+
+# re-login with new password
+d = check("hr login 2", client.post("/auth/login", json={"email": "hr@acme.com", "password": "HrPass456!"}))
+hr_token = d["access_token"]
+hr_headers = {"Authorization": f"Bearer {hr_token}"}
+
+# 7. register employee
+d = check(
+    "register employee",
+    client.post(
+        "/employees",
+        headers=hr_headers,
+        json={
+            "code": "EMP001",
+            "full_name": "Jane Doe",
+            "email": "jane@acme.com",
+            "department_id": dept_id,
+            "date_of_joining": "2026-01-01",
+            "basic_salary": 100000,
+        },
+    ),
+)
+emp_temp_password = d["temporary_password"]
+employee_id = d["employee"]["id"]
+print("employee temp password:", emp_temp_password)
+
+# 8. employee login + change password
+d = check("employee login", client.post("/auth/login", json={"email": "jane@acme.com", "password": emp_temp_password}))
+emp_token = d["access_token"]
+emp_headers = {"Authorization": f"Bearer {emp_token}"}
+check(
+    "employee change password",
+    client.post("/auth/change-password", headers=emp_headers, json={"old_password": emp_temp_password, "new_password": "JanePass123!"}),
+)
+d = check("employee login 2", client.post("/auth/login", json={"email": "jane@acme.com", "password": "JanePass123!"}))
+emp_token = d["access_token"]
+emp_headers = {"Authorization": f"Bearer {emp_token}"}
+
+# 9. check-in / check-out
+d = check("check-in", client.post("/attendance/check-in", headers=emp_headers, json={"source": "web"}))
+print("check-in status:", d["status"])
+d2 = check("check-in dup (409)", client.post("/attendance/check-in", headers=emp_headers, json={"source": "web"}), expect=409)
+d = check("check-out", client.post("/attendance/check-out", headers=emp_headers, json={}))
+print("check-out status:", d["status"])
+
+# Regression: the attendance module and the dashboards must agree on what "today" is.
+# They previously disagreed (UTC date vs server-local date), so the dashboard showed
+# "not checked in" while a second check-in was rejected with 409.
+me = check("employee dashboard agrees on today", client.get("/dashboards/me", headers=emp_headers))
+assert me["checked_in"] is True, f"dashboard disagrees with attendance about today: {me}"
+assert me["checked_out"] is True, me
+print("OK attendance and dashboard agree on today (checked in + out)")
+
+# Timezone is configurable and round-trips.
+tz_settings = check(
+    "set company timezone",
+    client.put("/org/settings", headers=admin_headers, json={"timezone": "Asia/Karachi"}),
+)
+assert tz_settings["timezone"] == "Asia/Karachi", tz_settings
+check("reset company timezone", client.put("/org/settings", headers=admin_headers, json={"timezone": "UTC"}))
+print("OK company timezone setting round-trips")
+
+# 10. leave types + apply
+d = check("leave types (employee)", client.get("/org/leave-types", headers=emp_headers))
+casual = next(lt for lt in d if lt["name"] == "casual")
+d = check(
+    "apply leave",
+    client.post(
+        "/leave/apply",
+        headers=emp_headers,
+        json={"leave_type_id": casual["id"], "start_date": "2026-11-02", "end_date": "2026-11-03", "reason": "Wedding"},
+    ),
+)
+leave_id = d["id"]
+print("leave days:", d["days"])
+
+# 11. HR approves leave
+d = check("leave inbox", client.get("/leave/inbox", headers=hr_headers))
+assert len(d) == 1
+d = check("decide leave", client.post(f"/leave/{leave_id}/decide", headers=hr_headers, json={"approve": True, "comment": "ok"}))
+assert d["status"] == "approved"
+
+# 12. leave balance
+d = check("leave balance", client.get("/leave/balance", headers=emp_headers))
+print("balance:", d)
+
+# 13. payroll draft + finalize
+d = check("create payroll draft", client.post("/payroll/runs", headers=hr_headers, json={"month": 1, "year": 2026}))
+run_id = d["id"]
+print("payslips in draft:", len(d["payslips"]), d["payslips"])
+d = check("finalize payroll", client.post(f"/payroll/runs/{run_id}/finalize", headers=admin_headers))
+assert d["status"] == "finalized"
+
+# 14. employee payslips + pdf
+d = check("my payslips", client.get("/payroll/payslips/mine", headers=emp_headers))
+assert len(d) == 1
+slip_id = d[0]["id"]
+r = client.get(f"/payroll/payslips/{slip_id}/pdf", headers=emp_headers)
+assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+print("OK payslip pdf bytes:", len(r.content))
+
+# 15. dashboards
+check("admin dashboard", client.get("/dashboards/admin", headers=admin_headers))
+check("hr dashboard", client.get("/dashboards/hr", headers=hr_headers))
+check("employee dashboard", client.get("/dashboards/me", headers=emp_headers))
+
+# 16. AI chat without key -> should degrade gracefully, not crash (AI_API_KEY is fake, provider call will fail -> AIError caught)
+r = client.post("/ai/chat", headers=emp_headers, json={"message": "How many sick leaves do I have left?"})
+print("ai chat status:", r.status_code, r.json() if r.status_code == 200 else r.text[:200])
+assert r.status_code == 200  # should degrade gracefully with error message, not 500
+
+# 17. smart leave with bad key -> graceful fallback
+r = client.post("/leave/smart", headers=emp_headers, json={"text": "need next monday off"})
+print("smart leave status:", r.status_code, r.json() if r.status_code == 200 else r.text[:200])
+assert r.status_code == 200
+
+# 18. RBAC check: employee cannot see org settings management endpoints meant for admin/hr-only write, cannot access audit log
+r = client.get("/audit-log", headers=emp_headers)
+assert r.status_code == 403, r.text
+print("OK RBAC: employee blocked from audit log (403)")
+
+r = client.get("/employees", headers=emp_headers)
+assert r.status_code == 403, r.text
+print("OK RBAC: employee blocked from employee directory (403)")
+
+# 19. employee cannot view another employee's profile
+r = client.get(f"/employees/{employee_id + 999}", headers=emp_headers)
+assert r.status_code in (403, 404), r.text
+print("OK RBAC: employee blocked from others' profile")
+
+# 20. AI tool role scoping (tested directly — no live LLM key needed)
+from app.ai.tools import run_tool
+from app.api.deps import CurrentUser
+from app.core.database import SessionLocal
+
+db = SessionLocal()
+emp_user = CurrentUser(id=3, email="jane@acme.com", role="employee", employee_id=employee_id)
+hr_user = CurrentUser(id=2, email="hr@acme.com", role="hr", employee_id=None)
+
+for tool_name in ("get_headcount", "get_late_comers", "get_leave_summary"):
+    res = run_tool(db, emp_user, tool_name, {})
+    assert "error" in res, f"{tool_name} leaked company data to an Employee: {res}"
+    print(f"OK AI scoping: {tool_name} refused for Employee")
+
+res = run_tool(db, emp_user, "get_attendance_summary", {})
+assert res.get("scope") == "own", f"attendance summary not own-scoped for Employee: {res}"
+print("OK AI scoping: get_attendance_summary is own-scoped for Employee")
+
+res = run_tool(db, hr_user, "get_headcount", {})
+assert "headcount" in res, f"HR wrongly blocked from headcount: {res}"
+res = run_tool(db, hr_user, "get_late_comers", {})
+assert "top_late_comers" in res, f"HR wrongly blocked from late-comers: {res}"
+print("OK AI scoping: HR still gets company-wide data")
+db.close()
+
+# 21. Admin can view attendance corrections and all leave records
+check("admin views corrections", client.get("/attendance/corrections/pending", headers=admin_headers))
+d = check("admin views all leave", client.get("/leave", headers=admin_headers))
+assert len(d) == 1, f"expected the approved leave record, got {d}"
+r = client.get("/leave", headers=emp_headers)
+assert r.status_code == 403, r.text
+print("OK RBAC: employee blocked from all-leave records (403)")
+
+# 22. Admin and HR can download any payslip PDF
+for label, headers in (("admin", admin_headers), ("hr", hr_headers)):
+    r = client.get(f"/payroll/payslips/{slip_id}/pdf", headers=headers)
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf", r.text
+    print(f"OK {label} downloaded payslip PDF ({len(r.content)} bytes)")
+
+# 23. CSV export requires auth
+r = client.get("/employees/export-csv", headers=hr_headers)
+assert r.status_code == 200 and "code,full_name" in r.text, r.text
+r = client.get("/employees/export-csv")
+assert r.status_code in (401, 403), r.text
+print("OK CSV export works for HR and rejects unauthenticated callers")
+
+# 24. Analytics: attendance rate, trend, breakdowns and working filters
+hr = check("hr dashboard (analytics)", client.get("/dashboards/hr", headers=hr_headers))
+for key in ("attendance_rate", "trend", "attendance_by_department", "leave_by_type"):
+    assert key in hr, f"HR dashboard missing {key}"
+assert len(hr["trend"]) > 0, "attendance trend is empty"
+assert all({"date", "present", "late", "absent"} <= set(point) for point in hr["trend"]), hr["trend"][:2]
+print(f"OK trend has {len(hr['trend'])} working days")
+
+# Exercise the attendance-rate formula against a hand-calculated window.
+# Mon 5 Oct 2026 - Fri 9 Oct 2026 is 5 working days for our 1 employee.
+# One full day present (1.0) + one half day (0.5) out of 5 expected days = 30%.
+from datetime import date as _date
+from app.models.attendance import Attendance as _Attendance
+
+db = SessionLocal()
+db.add(_Attendance(employee_id=employee_id, date=_date(2026, 10, 5), status="present", source="web"))
+db.add(_Attendance(employee_id=employee_id, date=_date(2026, 10, 6), status="half_day", source="web"))
+db.commit()
+db.close()
+
+window = check(
+    "attendance rate window",
+    client.get("/dashboards/hr", headers=hr_headers, params={"start": "2026-10-05", "end": "2026-10-09"}),
+)
+assert window["attendance_rate"] == 30.0, f"expected 30.0%, got {window['attendance_rate']}"
+assert window["absent_count"] == 3, f"expected 3 absent days, got {window['absent_count']}"
+dept_row = window["attendance_by_department"][0]
+assert dept_row["attendance_rate"] == 30.0 and dept_row["absenteeism_pct"] == 60.0, dept_row
+print("OK attendance rate maths: 1 present + 0.5 half day over 5 working days = 30.0%")
+print(f"OK absenteeism by department: {dept_row['department']} {dept_row['absenteeism_pct']}%")
+
+adm = check("admin dashboard (analytics)", client.get("/dashboards/admin", headers=admin_headers))
+for key in ("headcount_by_department", "gender_breakdown", "tenure_breakdown", "recent_audit", "attendance_rate"):
+    assert key in adm, f"Admin dashboard missing {key}"
+assert len(adm["recent_audit"]) > 0, "audit feed is empty"
+assert sum(b["count"] for b in adm["tenure_breakdown"]) == adm["headcount"], adm["tenure_breakdown"]
+print(f"OK admin breakdowns: depts={adm['headcount_by_department']} tenure={adm['tenure_breakdown']}")
+
+# department filter actually narrows the result
+in_dept = check("hr dashboard filtered to dept", client.get("/dashboards/hr", headers=hr_headers, params={"department_id": dept_id}))
+assert in_dept["headcount"] == 1, in_dept["headcount"]
+other = check("hr dashboard filtered to empty dept", client.get("/dashboards/hr", headers=hr_headers, params={"department_id": dept_id + 999}))
+assert other["headcount"] == 0 and other["attendance_rate"] == 0.0, other
+print("OK department filter narrows dashboard results")
+
+# date-range filter changes the window
+narrow = check(
+    "hr dashboard narrow range",
+    client.get("/dashboards/hr", headers=hr_headers, params={"start": "2026-01-05", "end": "2026-01-09"}),
+)
+assert narrow["range"] == {"start": "2026-01-05", "end": "2026-01-09"}, narrow["range"]
+assert len(narrow["trend"]) == 5, f"expected 5 working days Mon-Fri, got {len(narrow['trend'])}"
+print("OK date-range filter applied (5 working days in 05-09 Jan 2026)")
+
+# 25. Names instead of raw IDs across the HR-facing tables
+board = check("attendance board", client.get("/attendance/board", headers=hr_headers))
+assert len(board) == 1, f"board should list every employee, got {board}"
+assert board[0]["employee_name"] == "Jane Doe" and board[0]["employee_code"] == "EMP001", board[0]
+assert board[0]["department"] == "Engineering", board[0]
+print(f"OK board shows names: {board[0]['employee_name']} ({board[0]['department']})")
+
+leave_rows = check("leave records carry names", client.get("/leave", headers=admin_headers))
+assert leave_rows[0]["employee_name"] == "Jane Doe", leave_rows[0]
+assert leave_rows[0]["leave_type_name"] == "casual", leave_rows[0]
+
+run = check("payroll run carries names", client.get(f"/payroll/runs/{run_id}", headers=hr_headers))
+assert run["payslips"][0]["employee_name"] == "Jane Doe", run["payslips"][0]
+print("OK leave records and payslips carry employee names")
+
+# 26. The board must include employees who never checked in (previously invisible)
+# Register a second employee who has no attendance at all.
+second = check(
+    "register second employee",
+    client.post(
+        "/employees",
+        headers=hr_headers,
+        json={
+            "code": "EMP002",
+            "full_name": "Omar Siddiqui",
+            "email": "omar@acme.com",
+            "gender": "Male",
+            "department_id": dept_id,
+            "date_of_joining": "2026-02-01",
+            "basic_salary": 80000,
+        },
+    ),
+)
+second_id = second["employee"]["id"]
+
+board = check("board includes non-checked-in staff", client.get("/attendance/board", headers=hr_headers))
+names = {row["employee_name"]: row["status"] for row in board}
+assert "Omar Siddiqui" in names, f"employee with no attendance row is missing from the board: {names}"
+print(f"OK board statuses for everyone: {names}")
+
+# On a working day with no record and no leave, the status must read 'absent'.
+monday = check(
+    "board on a past working day",
+    client.get("/attendance/board", headers=hr_headers, params={"day": "2026-10-07"}),
+)
+omar_row = next(r for r in monday if r["employee_name"] == "Omar Siddiqui")
+assert omar_row["status"] == "absent", omar_row
+jane_row = next(r for r in monday if r["employee_name"] == "Jane Doe")
+assert jane_row["status"] == "absent", jane_row
+print("OK absent staff appear on the board for a past working day")
+
+# A weekend day is labelled as such rather than marking everyone absent.
+weekend = check(
+    "board on a weekend",
+    client.get("/attendance/board", headers=hr_headers, params={"day": "2026-10-11"}),
+)
+assert all(r["status"] in ("weekend", "on_leave") for r in weekend), weekend
+print("OK weekend days are not counted as absence on the board")
+
+# 26b. Loading the board must not rewrite history.
+# An absent day raised for correction has no check-out time either, and was previously
+# swept into "missing_checkout" by the board's finalize pass.
+check(
+    "request correction on an absent day",
+    client.post("/attendance/corrections", headers=emp_headers, json={"date": "2026-10-07", "reason": "Was on site, forgot to check in"}),
+)
+check("board after correction request", client.get("/attendance/board", headers=hr_headers))
+cal = check(
+    "attendance after board sweep",
+    client.get("/attendance/calendar", headers=hr_headers, params={"employee_id": employee_id, "start": "2026-10-05", "end": "2026-10-09"}),
+)
+by_date = {row["date"]: row["status"] for row in cal}
+assert by_date["2026-10-07"] == "absent", f"correction day was rewritten: {by_date}"
+assert by_date["2026-10-05"] == "present", f"synthetic present day was rewritten: {by_date}"
+assert by_date["2026-10-06"] == "half_day", f"synthetic half day was rewritten: {by_date}"
+print("OK loading the board no longer rewrites absent/corrected days")
+
+# The attendance rate must therefore stay stable after a board load.
+after = check(
+    "attendance rate after board load",
+    client.get("/dashboards/hr", headers=hr_headers, params={"start": "2026-10-05", "end": "2026-10-09"}),
+)
+assert after["attendance_rate"] == 15.0, f"expected 15.0% for 2 employees over 5 days, got {after['attendance_rate']}"
+print("OK attendance rate stable after board load (15.0% across 2 employees)")
+
+# 27. Employee 360 data sources
+check("360 profile", client.get(f"/employees/{employee_id}", headers=hr_headers))
+check("360 attendance", client.get("/attendance/calendar", headers=hr_headers, params={"employee_id": employee_id, "start": "2026-10-01", "end": "2026-10-31"}))
+emp_leave = check("360 leave", client.get("/leave", headers=hr_headers, params={"employee_id": employee_id}))
+assert len(emp_leave) == 1 and emp_leave[0]["employee_id"] == employee_id, emp_leave
+other_leave = check("360 leave for other employee", client.get("/leave", headers=hr_headers, params={"employee_id": second_id}))
+assert other_leave == [], other_leave
+emp_slips = check("360 payslips", client.get("/payroll/payslips", headers=hr_headers, params={"employee_id": employee_id}))
+assert len(emp_slips) == 1, emp_slips
+r = client.get("/payroll/payslips", headers=emp_headers, params={"employee_id": employee_id})
+assert r.status_code == 403, r.text
+print("OK Employee 360 lookups work and stay staff-only")
+
+# 28. Notifications are readable and can be marked read
+notes = check("notifications", client.get("/notifications", headers=emp_headers))
+assert len(notes) >= 1, "employee should have a leave-decision notification"
+unread_before = sum(1 for n in notes if not n["read"])
+assert unread_before >= 1, notes
+check("mark notification read", client.post(f"/notifications/{notes[0]['id']}/read", headers=emp_headers))
+notes_after = check("notifications after read", client.get("/notifications", headers=emp_headers))
+assert sum(1 for n in notes_after if not n["read"]) == unread_before - 1, notes_after
+print(f"OK notifications: {len(notes)} total, unread count drops after marking read")
+
+print("\nALL SMOKE TESTS PASSED")

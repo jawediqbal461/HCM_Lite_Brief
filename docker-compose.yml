@@ -43,9 +43,12 @@ services:
       - api
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env}
+    # Defaults take over the host's ports 80/443 (Caddy then handles HTTPS itself).
+    # If this server already runs nginx/Apache for other sites, bind to a local
+    # port instead and let that web server proxy to us — see .env.example.
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_BIND:-0.0.0.0:80}:80"
+      - "${HTTPS_BIND:-0.0.0.0:443}:443"
     volumes:
       # Keeps the Let's Encrypt certificates across restarts — without this you
       # re-request certificates every deploy and can hit rate limits.

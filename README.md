@@ -106,7 +106,53 @@ Then open your domain. That's the link you submit.
 
 **Tip:** test with `SITE_ADDRESS=:80` and the server's IP first. Once that works, switch to your domain and run `docker compose up -d --build` again — Caddy fetches the certificate on its own. Going straight to a domain whose DNS has not propagated yet makes Caddy fail its certificate challenge and the site will not load.
 
-### 4.2 Day-to-day commands
+### 4.2 If the server already hosts other sites
+
+Check first — this matters:
+
+```bash
+ss -tlnp | grep -E ':80 |:443 '
+```
+
+If nginx or Apache is already listening, **do not let this stack take ports 80 and 443**; those sites would go offline. Instead run it on a local port and proxy to it.
+
+In `.env`:
+
+```
+SITE_ADDRESS=:80
+HTTP_BIND=127.0.0.1:8080
+HTTPS_BIND=127.0.0.1:8443
+PUBLIC_URL=https://hcm.example.com
+```
+
+Then `docker compose up -d --build` and add a vhost to the existing nginx — e.g. `/etc/nginx/conf.d/hcm.conf`:
+
+```nginx
+server {
+    listen 80;
+    server_name hcm.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # CSV employee imports
+        client_max_body_size 10m;
+    }
+}
+```
+
+```bash
+nginx -t && systemctl reload nginx          # -t first: a bad config would drop every site
+certbot --nginx -d hcm.example.com          # adds the HTTPS block and auto-renews
+```
+
+Here the existing nginx terminates TLS and Caddy just serves the app over plain HTTP on the loopback interface, so nothing is exposed publicly except through nginx.
+
+### 4.3 Day-to-day commands
 
 | Task | Command |
 |---|---|
@@ -119,13 +165,13 @@ Then open your domain. That's the link you submit.
 
 `docker compose down -v` deletes **all** volumes, which includes the Let's Encrypt certificates as well as the data. That is fine occasionally, but repeating it many times in a day can hit Let's Encrypt rate limits.
 
-### 4.3 First run on the server
+### 4.4 First run on the server
 
 1. Open the site. It should show **first-run setup**, not a login form. If it shows login, the database already has a company in it.
 2. Create the company and the Admin account.
 3. In Company setup, **set your timezone** (e.g. `Asia/Karachi`) before anyone checks in — the server runs in UTC, and attendance dates and the "late after 09:15" rule are evaluated in the company timezone.
 
-### 4.4 Alternative: a managed platform
+### 4.5 Alternative: a managed platform
 
 If you would rather not run a server, deploy the backend as a web service (build `pip install -r requirements.txt`, start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, Python 3.12 per `backend/runtime.txt`) and the frontend as a static site (build `npm install && npm run build`, publish `frontend/dist`).
 
@@ -133,7 +179,7 @@ In that split setup the two are on different domains, so you must also set `VITE
 
 `frontend/public/_redirects` already carries the `/* /index.html 200` rewrite for Netlify and Render static sites. On Vercel add the equivalent in `vercel.json`, on Nginx use `try_files $uri /index.html`. **Without that rule every page except `/` 404s on reload.**
 
-### 4.5 Gotchas worth knowing before demo day
+### 4.6 Gotchas worth knowing before demo day
 
 - **Free tiers sleep.** Managed free instances spin down when idle and take 30–60s to wake. Open the link a few minutes before demoing. (A VPS does not have this problem.)
 - **No migrations.** Tables are created with `create_all`, which does *not* ALTER existing tables. If you change a model after deploying, recreate the database — the app is designed to start empty anyway.

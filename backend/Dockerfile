@@ -13,4 +13,6 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Shell form so the platform's $PORT is expanded at runtime.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# --proxy-headers: this runs behind Caddy/nginx, so trust X-Forwarded-* for the
+# real client scheme and IP rather than reporting the proxy's.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*'"]

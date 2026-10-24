@@ -74,60 +74,70 @@ This creates the company settings row and the first Admin user, and logs you in 
 
 ## 4. Deploying (the hosted link for submission)
 
-The submission needs a **live URL a judge can open**, and it must land on first-run setup so they can create the company themselves. Three pieces: a Postgres database, the backend API, and the frontend static site.
+The submission needs a **live URL a judge can open**, and it must land on first-run setup so they can create the company themselves.
 
-### 4.1 Database
+### 4.1 On your own server (one command)
 
-Create a free PostgreSQL instance (Neon, Supabase, or your host's own Postgres) and copy its connection string. Change the scheme to `postgresql+psycopg://` — this project uses psycopg 3:
+`docker-compose.yml` brings up the whole stack: PostgreSQL, the API, and the frontend served by Caddy with **automatic HTTPS**. The API is proxied at `/api` on the same origin, so there is no CORS to configure and only one certificate to manage.
 
+**You need:** a VPS with SSH, Docker, ports 80 and 443 open, and (for HTTPS) a DNS A record pointing your domain at the server.
+
+```bash
+# 1. Install Docker (Ubuntu/Debian; skip if already installed)
+curl -fsSL https://get.docker.com | sh
+
+# 2. Get the code
+git clone https://github.com/jawediqbal461/HCM_Lite_Brief.git
+cd HCM_Lite_Brief
+
+# 3. Set your values — at minimum SITE_ADDRESS, PUBLIC_URL,
+#    POSTGRES_PASSWORD, JWT_SECRET and (optionally) AI_API_KEY
+cp .env.example .env
+nano .env
+
+# 4. Build and start
+docker compose up -d --build
+
+# 5. Watch it come up; the API logs "Application startup complete"
+docker compose logs -f
 ```
-postgresql+psycopg://user:password@host/dbname
-```
 
-Tables are created automatically the first time the API starts. There is no migration step.
+Then open your domain. That's the link you submit.
 
-### 4.2 Backend
+**Tip:** test with `SITE_ADDRESS=:80` and the server's IP first. Once that works, switch to your domain and run `docker compose up -d --build` again — Caddy fetches the certificate on its own. Going straight to a domain whose DNS has not propagated yet makes Caddy fail its certificate challenge and the site will not load.
 
-Deploy the `backend/` directory as a web service.
+### 4.2 Day-to-day commands
 
-- **Build:** `pip install -r requirements.txt`
-- **Start:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Python:** 3.12 (pinned in `backend/runtime.txt`; do not use 3.14, several wheels aren't published for it yet)
-
-A `backend/Dockerfile` is included if your host prefers containers.
-
-Environment variables:
-
-| Variable | Value |
+| Task | Command |
 |---|---|
-| `DATABASE_URL` | the `postgresql+psycopg://...` string from 4.1 |
-| `JWT_SECRET` | a long random string |
-| `AI_PROVIDER` | `anthropic` or `openai` |
-| `AI_API_KEY` | your LLM key — **server-side only, never in the frontend** |
-| `AI_MODEL` | e.g. `claude-sonnet-4-5` or `gpt-4o-mini` |
-| `FRONTEND_ORIGIN` | your deployed frontend URL, no trailing slash (see 4.4) |
+| View logs | `docker compose logs -f api` |
+| Restart one service | `docker compose restart api` |
+| Deploy new code | `git pull && docker compose up -d --build` |
+| Back up the database | `docker compose exec db pg_dump -U hcm hcm_lite > backup.sql` |
+| Stop everything | `docker compose down` |
+| Start from an empty database | `docker compose down -v` then `docker compose up -d --build` |
 
-### 4.3 Frontend
+`docker compose down -v` deletes **all** volumes, which includes the Let's Encrypt certificates as well as the data. That is fine occasionally, but repeating it many times in a day can hit Let's Encrypt rate limits.
 
-Deploy `frontend/` as a static site.
+### 4.3 First run on the server
 
-- **Build:** `npm install && npm run build`
-- **Publish directory:** `frontend/dist`
-- **Environment:** `VITE_API_URL` = your deployed backend URL (baked in at build time, so redeploy after changing it)
+1. Open the site. It should show **first-run setup**, not a login form. If it shows login, the database already has a company in it.
+2. Create the company and the Admin account.
+3. In Company setup, **set your timezone** (e.g. `Asia/Karachi`) before anyone checks in — the server runs in UTC, and attendance dates and the "late after 09:15" rule are evaluated in the company timezone.
 
-`frontend/public/_redirects` ships a `/* /index.html 200` rewrite so deep links like `/hr/employees/1` survive a refresh. That file covers Netlify and Render static sites; on Vercel add the equivalent rewrite in `vercel.json`, and on Nginx use `try_files $uri /index.html`. **Without this rule every page except `/` 404s on reload** — easy to miss until a judge refreshes.
+### 4.4 Alternative: a managed platform
 
-### 4.4 After both are up
+If you would rather not run a server, deploy the backend as a web service (build `pip install -r requirements.txt`, start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, Python 3.12 per `backend/runtime.txt`) and the frontend as a static site (build `npm install && npm run build`, publish `frontend/dist`).
 
-1. Set `FRONTEND_ORIGIN` on the backend to the frontend's real URL and redeploy — otherwise every browser request fails CORS.
-2. Open the frontend. It should show **first-run setup**, not a login form. If it shows login, the database already has a company in it.
-3. Set your **timezone** in Company setup immediately (section 3) — hosted servers usually run in UTC.
+In that split setup the two are on different domains, so you must also set `VITE_API_URL` to the backend URL at build time and `FRONTEND_ORIGIN` on the backend to the frontend URL — otherwise every request fails CORS. Use a managed Postgres (Neon, Supabase) and give the backend its connection string as `DATABASE_URL`, with the scheme changed to `postgresql+psycopg://`.
+
+`frontend/public/_redirects` already carries the `/* /index.html 200` rewrite for Netlify and Render static sites. On Vercel add the equivalent in `vercel.json`, on Nginx use `try_files $uri /index.html`. **Without that rule every page except `/` 404s on reload.**
 
 ### 4.5 Gotchas worth knowing before demo day
 
-- **Free tiers sleep.** Render/Fly free instances spin down when idle and take ~30–60s to wake. Open the hosted link a few minutes before demoing so the first judge request isn't a cold start.
-- **No migrations.** Tables are created with `create_all`, which does *not* ALTER existing tables. If you change a model after deploying, drop and recreate the database (fine here — the app is designed to start empty).
-- **Never commit `.env`.** Only `.env.example` is in git; real secrets belong in the host's environment settings.
+- **Free tiers sleep.** Managed free instances spin down when idle and take 30–60s to wake. Open the link a few minutes before demoing. (A VPS does not have this problem.)
+- **No migrations.** Tables are created with `create_all`, which does *not* ALTER existing tables. If you change a model after deploying, recreate the database — the app is designed to start empty anyway.
+- **Never commit `.env`.** Only the `.env.example` files are in git; real secrets stay on the server.
 
 ## 5. What's implemented
 
@@ -186,7 +196,9 @@ backend/
     main.py
   tests/
     smoke_test.py  # end-to-end run of the demo script + RBAC and analytics checks
-  Dockerfile
+  Dockerfile       # API image
+docker-compose.yml # whole stack: Postgres + API + frontend/Caddy
+.env.example       # deployment settings (copy to .env on the server)
 frontend/
   src/
     api/         # axios client
@@ -194,6 +206,8 @@ frontend/
     components/  # Layout, ProtectedRoute, AI chat panel, KPI cards
     pages/
       admin/ hr/ employee/ shared/
+  Caddyfile        # static serving + /api reverse proxy + automatic HTTPS
+  Dockerfile       # builds the app, then serves it with Caddy
 ```
 
 ## 9. Security notes

@@ -1,0 +1,21 @@
+# SITE_ADDRESS comes from .env:
+#   a domain (hcm.example.com) -> Caddy gets a Let's Encrypt certificate automatically
+#   :80                        -> plain HTTP, handy for testing against the server's IP first
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# The API is served from the same origin under /api, so the browser never makes a
+	# cross-origin request and CORS never enters the picture. handle_path strips the
+	# /api prefix, so /api/auth/login reaches the backend as /auth/login.
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else is the React app. Unknown paths fall back to index.html so deep
+	# links like /hr/employees/1 still work when someone refreshes the page.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

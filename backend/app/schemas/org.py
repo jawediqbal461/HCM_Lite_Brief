@@ -81,6 +81,8 @@ class HRUserCreate(BaseModel):
     full_name: str
     email: str
     password: str
+    # Off for a shared demo login that several people need to sign in with.
+    require_password_change: bool = True
 
 
 class UserOut(BaseModel):

@@ -58,10 +58,22 @@ def generate_temp_password() -> str:
     return secrets.token_urlsafe(9)
 
 
-def create_hr_user(db: Session, actor_id: int, full_name: str, email: str, password: str) -> User:
+def create_hr_user(
+    db: Session,
+    actor_id: int,
+    full_name: str,
+    email: str,
+    password: str,
+    require_password_change: bool = True,
+) -> User:
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email already in use")
-    user = User(email=email, password_hash=hash_password(password), role="hr", must_change_password=True)
+    user = User(
+        email=email,
+        password_hash=hash_password(password),
+        role="hr",
+        must_change_password=require_password_change,
+    )
     db.add(user)
     db.flush()
     log_action(db, actor_id, "create", "user", user.id, after={"email": email, "role": "hr", "full_name": full_name})

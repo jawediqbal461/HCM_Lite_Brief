@@ -84,8 +84,15 @@ def create_holiday(payload: HolidayIn, current: CurrentUser = Depends(require_ad
 
 @router.post("/hr-users")
 def create_hr_user(payload: HRUserCreate, current: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)):
-    user = auth_service.create_hr_user(db, current.id, payload.full_name, payload.email, payload.password)
-    return {"id": user.id, "email": user.email}
+    user = auth_service.create_hr_user(
+        db,
+        current.id,
+        payload.full_name,
+        payload.email,
+        payload.password,
+        require_password_change=payload.require_password_change,
+    )
+    return {"id": user.id, "email": user.email, "must_change_password": user.must_change_password}
 
 
 @router.get("/users", response_model=list[UserOut])

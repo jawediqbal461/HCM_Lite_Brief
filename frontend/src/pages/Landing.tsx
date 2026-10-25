@@ -6,35 +6,70 @@ import { useAuth } from "../context/AuthContext";
 const MODULES = [
   {
     title: "Attendance",
-    body: "Web check-in and check-out with the server stamping the time. Late, half-day and missing-checkout are decided by your own office rules, not guesswork.",
-  },
-  {
-    title: "Camera check-in",
-    body: "Optional face-detected check-in that is only accepted inside the office geofence. The server measures the distance itself, so it cannot be faked from the browser.",
+    body: "Web check-in and check-out with the server stamping the time. Late, half-day, absent and missing-checkout follow your own office hours, grace period and weekend — set once in Company setup.",
   },
   {
     title: "Leave",
-    body: "Apply in working days only — weekends and public holidays are skipped. Overlapping requests and over-balance requests are rejected before they reach HR.",
+    body: "Apply in working days only, so weekends and public holidays are skipped automatically. Overlapping requests and anything over the remaining balance are refused before they ever reach HR.",
   },
   {
     title: "Payroll",
-    body: "Monthly runs with allowances, absence and unpaid-leave deductions, tax slabs and proration for joiners and leavers. Admin finalizes, and a finalized month locks.",
+    body: "Monthly runs with HRA and medical allowances, deductions for absence, unpaid leave and half days, tax slabs, and proration for joiners and leavers. Admin finalizes, and a finalized month locks.",
+  },
+  {
+    title: "Payslip PDFs",
+    body: "Every finalized run produces a payslip anyone entitled to it can download — the employee for their own, Admin and HR for all of them.",
   },
   {
     title: "Dashboards",
-    body: "Attendance rate, absenteeism, leave utilization, payroll cost and headcount — computed on the server from real records, filterable by date range and department.",
-  },
-  {
-    title: "AI assistant",
-    body: "Ask questions in plain words and get answers from the same services the dashboards use, so the numbers always agree. It only ever sees what your role is allowed to see.",
+    body: "Attendance rate, absenteeism by department, leave utilization against quota, payroll cost, headcount and attrition — all computed on the server, with date-range and department filters that really filter.",
   },
   {
     title: "Employee 360",
-    body: "One page per employee: profile, attendance history, every leave request and all payslips, with PDF download.",
+    body: "One page per employee: profile, the last 30 days of attendance, every leave request and all payslips with downloads.",
+  },
+  {
+    title: "CSV import & export",
+    body: "Bulk-load employees with a dry run first that reports the exact row, field and reason for every problem, so a bad file never half-imports.",
+  },
+  {
+    title: "Users & access",
+    body: "Admin sees every login, changes roles, resets passwords and suspends accounts — with guards that stop the company locking itself out of its own system.",
+  },
+  {
+    title: "Announcements & notifications",
+    body: "Post to everyone, and in-app notifications land when a leave request is decided, a correction is answered or a payslip is ready.",
   },
   {
     title: "Audit log",
     body: "Every create, update, approval and payroll finalization is recorded with who did it and what changed, before and after.",
+  },
+];
+
+const HIGHLIGHTS = [
+  {
+    tag: "Face + location",
+    title: "Camera attendance that cannot be faked from the sofa",
+    body: "Check in with the camera and it is accepted only when exactly one face is in frame and the device is inside the office area. Face detection runs on the device itself, and no photo is ever stored — only the result.",
+    points: [
+      "Exactly one face required: zero or several are both refused",
+      "The server recalculates the distance to the office with the Haversine formula",
+      "A GPS fix vaguer than 100 m is rejected as too weak to prove presence",
+      "Admin sets the office point and radius in one click from their own location",
+      "Every rule is re-checked on the server, so editing the browser proves nothing",
+    ],
+  },
+  {
+    tag: "AI assistant",
+    title: "Ask in plain words, get answers from the real records",
+    body: "The assistant calls the same services the dashboards use, so its answers and the charts can never disagree. It runs with the permissions of whoever is asking.",
+    points: [
+      "\"What is this month's attendance rate?\" — the same number the dashboard shows",
+      "\"How many sick leaves do I have left?\" — the employee's own balance",
+      "Type a sentence like \"next Monday and Tuesday off for a wedding\" and get a filled-in leave form to confirm",
+      "Ask a colleague's salary and it declines — no tool in the system can even fetch it for them",
+      "Policy questions are answered from the written rules, or not at all",
+    ],
   },
 ];
 
@@ -120,6 +155,28 @@ export default function Landing() {
       </section>
 
       <section className="bg-slate-50 border-y">
+        <div className="max-w-6xl mx-auto px-5 py-16 space-y-10">
+          {HIGHLIGHTS.map((h) => (
+            <div key={h.tag} className="grid md:grid-cols-2 gap-8 items-start bg-white border rounded-lg p-6">
+              <div>
+                <span className="text-xs font-semibold tracking-wide text-brand uppercase">{h.tag}</span>
+                <h3 className="text-xl font-bold text-brand-dark mt-2">{h.title}</h3>
+                <p className="text-slate-600 mt-3 leading-relaxed">{h.body}</p>
+              </div>
+              <ul className="space-y-2">
+                {h.points.map((p) => (
+                  <li key={p} className="flex gap-2 text-sm text-slate-700">
+                    <span className="text-brand font-bold shrink-0">✓</span>
+                    <span>{p}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="border-b">
         <div className="max-w-6xl mx-auto px-5 py-16">
           <h2 className="text-2xl font-bold text-brand-dark">Three roles, enforced on the server</h2>
           <p className="text-slate-500 mt-1">

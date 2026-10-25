@@ -13,7 +13,7 @@ export default function UserAccess() {
   const [users, setUsers] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ full_name: "", email: "", password: "" });
+  const [form, setForm] = useState({ full_name: "", email: "", password: "", require_password_change: true });
 
   function load() {
     api
@@ -40,8 +40,12 @@ export default function UserAccess() {
     setError("");
     try {
       await api.post("/org/hr-users", form);
-      setMsg(`HR login created for ${form.email}. They must change this password on first sign-in.`);
-      setForm({ full_name: "", email: "", password: "" });
+      setMsg(
+        form.require_password_change
+          ? `HR login created for ${form.email}. They must change this password on first sign-in.`
+          : `HR login created for ${form.email}. The password stays as set — fine for a shared demo login, change it afterwards.`,
+      );
+      setForm({ full_name: "", email: "", password: "", require_password_change: true });
       load();
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -181,6 +185,15 @@ export default function UserAccess() {
             required
           />
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.require_password_change}
+            onChange={(e) => setForm({ ...form, require_password_change: e.target.checked })}
+          />
+          Require a password change on first sign-in
+          <span className="text-xs text-slate-400">— uncheck for a shared demo login</span>
+        </label>
         <button className="bg-brand text-white rounded px-4 py-1.5 text-sm">Create HR login</button>
       </form>
 

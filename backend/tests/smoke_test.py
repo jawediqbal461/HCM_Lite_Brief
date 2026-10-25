@@ -540,4 +540,54 @@ d = check("sign in with the temporary password", client.post("/auth/login", json
 assert d["must_change_password"] is True, d
 print("OK password reset invalidates the old password and forces a change")
 
+# 31. A shared demo login can skip the forced password change
+d = check(
+    "create HR login without forced change",
+    client.post(
+        "/org/hr-users",
+        headers=admin_headers,
+        json={
+            "full_name": "Demo HR",
+            "email": "demo-hr@acme.com",
+            "password": "demo-hr-password",
+            "require_password_change": False,
+        },
+    ),
+)
+assert d["must_change_password"] is False, d
+login = check("demo login works as set", client.post("/auth/login", json={"email": "demo-hr@acme.com", "password": "demo-hr-password"}))
+assert login["must_change_password"] is False, login
+print("OK a shared login can be created without forcing a password change")
+
+# ...while the default still forces one.
+d = check(
+    "create HR login with the default",
+    client.post(
+        "/org/hr-users",
+        headers=admin_headers,
+        json={"full_name": "Normal HR", "email": "normal-hr@acme.com", "password": "temp-password-1"},
+    ),
+)
+assert d["must_change_password"] is True, d
+print("OK the default still requires a password change on first sign-in")
+
+# 32. Anyone can change their own password from their profile
+demo_headers = {"Authorization": f"Bearer {login['access_token']}"}
+check("profile: who am i", client.get("/auth/me", headers=demo_headers))
+check(
+    "change own password",
+    client.post("/auth/change-password", headers=demo_headers, json={"old_password": "demo-hr-password", "new_password": "a-much-longer-one"}),
+)
+r = client.post("/auth/login", json={"email": "demo-hr@acme.com", "password": "demo-hr-password"})
+assert r.status_code == 401, "the old password still works"
+check("sign in with the new password", client.post("/auth/login", json={"email": "demo-hr@acme.com", "password": "a-much-longer-one"}))
+r = client.post("/auth/change-password", headers=demo_headers, json={"old_password": "wrong-one", "new_password": "another-long-one"})
+assert r.status_code == 400, r.text
+print("OK a user can change their own password, and the old one stops working")
+
+# An HR login has no employee record, so the profile page's details call 404s cleanly.
+r = client.get("/employees/me", headers=demo_headers)
+assert r.status_code == 400, r.text
+print("OK profile handles a login with no employee record")
+
 print("\nALL SMOKE TESTS PASSED")

@@ -17,7 +17,7 @@ import EmployeeDashboard from "./pages/employee/EmployeeDashboard";
 import MyAttendance from "./pages/employee/MyAttendance";
 import MyLeave from "./pages/employee/MyLeave";
 import MyPayslips from "./pages/employee/MyPayslips";
-import MyProfile from "./pages/employee/MyProfile";
+import Profile from "./pages/shared/Profile";
 
 import EmployeeDirectory from "./pages/shared/EmployeeDirectory";
 import Employee360 from "./pages/shared/Employee360";
@@ -45,6 +45,7 @@ export default function App() {
           <Route path="/admin/payroll" element={<Payroll />} />
           <Route path="/admin/audit" element={<AuditLog />} />
           <Route path="/admin/announcements" element={<Announcements />} />
+          <Route path="/admin/profile" element={<Profile />} />
         </Route>
       </Route>
 
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/hr/leave" element={<LeaveRequests canDecide={true} />} />
           <Route path="/hr/payroll" element={<Payroll />} />
           <Route path="/hr/announcements" element={<Announcements />} />
+          <Route path="/hr/profile" element={<Profile />} />
         </Route>
       </Route>
 
@@ -66,7 +68,7 @@ export default function App() {
           <Route path="/employee/attendance" element={<MyAttendance />} />
           <Route path="/employee/leave" element={<MyLeave />} />
           <Route path="/employee/payslips" element={<MyPayslips />} />
-          <Route path="/employee/profile" element={<MyProfile />} />
+          <Route path="/employee/profile" element={<Profile />} />
           <Route path="/employee/announcements" element={<Announcements />} />
         </Route>
       </Route>
@@ -87,6 +89,7 @@ const adminNav = [
   { to: "/admin/payroll", label: "Payroll" },
   { to: "/admin/audit", label: "Audit log" },
   { to: "/admin/announcements", label: "Announcements" },
+  { to: "/admin/profile", label: "My profile" },
 ];
 
 const hrNav = [
@@ -96,6 +99,7 @@ const hrNav = [
   { to: "/hr/leave", label: "Leave approvals" },
   { to: "/hr/payroll", label: "Payroll" },
   { to: "/hr/announcements", label: "Announcements" },
+  { to: "/hr/profile", label: "My profile" },
 ];
 
 const employeeNav = [
@@ -103,6 +107,6 @@ const employeeNav = [
   { to: "/employee/attendance", label: "Attendance" },
   { to: "/employee/leave", label: "Leave" },
   { to: "/employee/payslips", label: "Payslips" },
-  { to: "/employee/profile", label: "Profile" },
+  { to: "/employee/profile", label: "My profile" },
   { to: "/employee/announcements", label: "Announcements" },
 ];

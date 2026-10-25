@@ -4,11 +4,13 @@ from pydantic import BaseModel
 
 
 class CheckInRequest(BaseModel):
+    source: str = "web"  # web | camera
+    # Only meaningful when source == "camera"; the server re-checks all of it.
     lat: float | None = None
     lng: float | None = None
     accuracy: float | None = None
-    source: str = "web"  # web | camera
     face_detected: bool | None = None
+    faces_count: int | None = None
 
 
 class CheckOutRequest(BaseModel):

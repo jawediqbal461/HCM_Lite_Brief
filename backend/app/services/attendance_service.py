@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.clock import business_now, business_today
+from app.services.geofence import check_camera_attendance
 from app.models.attendance import Attendance
 from app.models.employee import Employee
 from app.models.leave import LeaveRequest
@@ -34,7 +35,25 @@ def has_approved_leave(db: Session, employee_id: int, d: date) -> bool:
     )
 
 
-def check_in(db: Session, settings: CompanySettings, employee: Employee, source: str = "web") -> Attendance:
+def check_in(
+    db: Session,
+    settings: CompanySettings,
+    employee: Employee,
+    source: str = "web",
+    camera: dict | None = None,
+) -> Attendance:
+    if source == "camera":
+        result = check_camera_attendance(
+            settings,
+            face_detected=(camera or {}).get("face_detected"),
+            faces_count=(camera or {}).get("faces_count"),
+            lat=(camera or {}).get("lat"),
+            lng=(camera or {}).get("lng"),
+            accuracy=(camera or {}).get("accuracy"),
+        )
+        if not result.ok:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, result.reason)
+
     now = business_now(settings)
     today = now.date()
 

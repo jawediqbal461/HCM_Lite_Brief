@@ -172,8 +172,34 @@ export default function CompanySettings() {
               onChange={(e) => setSettings({ ...settings, office_radius_m: e.target.value })}
             />
           </label>
-          <div className="col-span-2">
+          <div className="col-span-2 flex items-center gap-3">
             <button className="bg-brand text-white rounded px-4 py-1.5 text-sm">Save</button>
+            <button
+              type="button"
+              className="text-sm text-brand underline"
+              onClick={() => {
+                if (!window.isSecureContext) {
+                  setMsg("Location needs HTTPS. Open this site over https:// to use it.");
+                  return;
+                }
+                setMsg("Getting your location…");
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    setSettings({
+                      ...settings,
+                      office_lat: pos.coords.latitude,
+                      office_lng: pos.coords.longitude,
+                    });
+                    setMsg(`Filled from your location (±${Math.round(pos.coords.accuracy)} m). Press Save to apply.`);
+                  },
+                  () => setMsg("Could not get your location. Allow location access and try again."),
+                  { enableHighAccuracy: true, timeout: 15000 },
+                );
+              }}
+            >
+              Use my current location
+            </button>
+            <span className="text-xs text-slate-400">Sit at the office and click this to set the check-in area.</span>
           </div>
         </form>
       </Section>

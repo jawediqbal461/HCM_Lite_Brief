@@ -30,7 +30,19 @@ def _employee_for(current: CurrentUser, db: Session) -> Employee:
 def check_in(payload: CheckInRequest, current: CurrentUser = Depends(require_any), db: Session = Depends(get_db)):
     employee = _employee_for(current, db)
     settings = org_service.get_settings(db)
-    return attendance_service.check_in(db, settings, employee, source=payload.source)
+    return attendance_service.check_in(
+        db,
+        settings,
+        employee,
+        source=payload.source,
+        camera={
+            "face_detected": payload.face_detected,
+            "faces_count": payload.faces_count,
+            "lat": payload.lat,
+            "lng": payload.lng,
+            "accuracy": payload.accuracy,
+        },
+    )
 
 
 @router.post("/check-out", response_model=AttendanceOut)

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import api, { apiErrorMessage } from "../../api/client";
+import CameraCheckIn from "../../components/CameraCheckIn";
 
 export default function MyAttendance() {
   const [today, setToday] = useState<any>(null);
@@ -71,6 +72,8 @@ export default function MyAttendance() {
           Check out
         </button>
       </div>
+
+      <CameraCheckIn onCheckedIn={load} />
 
       <div className="bg-white rounded-lg shadow p-4">
         <h2 className="font-semibold mb-2">Last 30 days</h2>

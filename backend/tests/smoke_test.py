@@ -429,4 +429,53 @@ notes_after = check("notifications after read", client.get("/notifications", hea
 assert sum(1 for n in notes_after if not n["read"]) == unread_before - 1, notes_after
 print(f"OK notifications: {len(notes)} total, unread count drops after marking read")
 
+# 29. Camera check-in: every rule is enforced server-side
+from app.services.geofence import check_camera_attendance, haversine_metres
+
+
+class _Settings:
+    def __init__(self, lat=24.8607, lng=67.0011, radius=150):
+        self.office_lat = lat
+        self.office_lng = lng
+        self.office_radius_m = radius
+
+
+OFFICE = _Settings()
+AT_DESK = {"lat": 24.8607, "lng": 67.0011, "accuracy": 20.0}
+
+# A known distance: Karachi -> Lahore is roughly 1,020 km.
+km = haversine_metres(24.8607, 67.0011, 31.5204, 74.3587) / 1000
+assert 1000 < km < 1050, f"haversine looks wrong: {km:.0f} km"
+print(f"OK haversine sanity: Karachi-Lahore {km:.0f} km")
+
+ok = check_camera_attendance(OFFICE, face_detected=True, faces_count=1, **AT_DESK)
+assert ok.ok, ok.reason
+print(f"OK camera check-in accepted at the office ({ok.distance_m:.0f} m away)")
+
+cases = [
+    ("no face", dict(face_detected=False, faces_count=0, **AT_DESK), "no face"),
+    ("two faces", dict(face_detected=True, faces_count=2, **AT_DESK), "more than one"),
+    ("no location", dict(face_detected=True, faces_count=1, lat=None, lng=None, accuracy=None), "location unavailable"),
+    ("vague GPS", dict(face_detected=True, faces_count=1, lat=24.8607, lng=67.0011, accuracy=250.0), "not precise"),
+    ("far away", dict(face_detected=True, faces_count=1, lat=31.5204, lng=74.3587, accuracy=10.0), "outside"),
+]
+for label, kwargs, expected in cases:
+    res = check_camera_attendance(OFFICE, **kwargs)
+    assert not res.ok, f"{label} should have been rejected"
+    assert expected in res.reason.lower(), f"{label}: unexpected reason {res.reason!r}"
+    print(f"OK camera check-in rejected ({label})")
+
+no_office = check_camera_attendance(_Settings(lat=None, lng=None), face_detected=True, faces_count=1, **AT_DESK)
+assert not no_office.ok and "office location" in no_office.reason.lower(), no_office.reason
+print("OK camera check-in refused when the office location is not configured")
+
+# And through the API: a camera check-in without a face must not create a record.
+r = client.post(
+    "/attendance/check-in",
+    headers=emp_headers,
+    json={"source": "camera", "face_detected": False, "faces_count": 0, "lat": 24.8607, "lng": 67.0011, "accuracy": 10},
+)
+assert r.status_code == 422, f"expected 422, got {r.status_code} {r.text[:200]}"
+print("OK API rejects a camera check-in with no face (422)")
+
 print("\nALL SMOKE TESTS PASSED")

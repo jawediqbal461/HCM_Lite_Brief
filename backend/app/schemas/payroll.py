@@ -23,6 +23,7 @@ class PayslipOut(BaseModel):
     absent_days: float
     unpaid_days: float
     half_days: float
+    late_penalty_days: float = 0
     deductions: float
     tax: float
     net_pay: float

@@ -590,4 +590,60 @@ r = client.get("/employees/me", headers=demo_headers)
 assert r.status_code == 400, r.text
 print("OK profile handles a login with no employee record")
 
+# 33. Late penalty rule: every 3 lates in a month cost half a day
+from app.services.payroll_service import LATES_PER_PENALTY, PENALTY_DAYS
+
+assert (LATES_PER_PENALTY, PENALTY_DAYS) == (3, 0.5), "the brief's rule is 3 lates = 0.5 day"
+
+db = SessionLocal()
+# Four late arrivals for Omar on past working days in Oct 2026 -> one penalty, not two.
+# They must be in the past: insights only look back, never forward.
+for day in (1, 2, 12, 13):
+    db.add(_Attendance(employee_id=second_id, date=_date(2026, 10, day), status="late", source="web"))
+db.commit()
+db.close()
+
+run = check("payroll with lates", client.post("/payroll/runs", headers=hr_headers, json={"month": 10, "year": 2026}))
+slips = {s["employee_id"]: s for s in run["payslips"]}
+omar = slips[second_id]
+assert omar["late_penalty_days"] == 0.5, f"4 lates should cost one 0.5-day penalty, got {omar['late_penalty_days']}"
+print(f"OK 4 lates -> {omar['late_penalty_days']} day penalty (partial groups ignored)")
+
+jane_slip = slips[employee_id]
+assert jane_slip["late_penalty_days"] == 0, jane_slip["late_penalty_days"]
+print("OK an employee with no lates gets no penalty")
+
+# Two more lates take Omar to six -> the penalty must double.
+db = SessionLocal()
+for day in (14, 15):
+    db.add(_Attendance(employee_id=second_id, date=_date(2026, 10, day), status="late", source="web"))
+db.commit()
+db.close()
+
+run = check("payroll recomputed", client.post("/payroll/runs", headers=hr_headers, json={"month": 10, "year": 2026}))
+omar = {s["employee_id"]: s for s in run["payslips"]}[second_id]
+assert omar["late_penalty_days"] == 1.0, f"6 lates should cost 1.0 day, got {omar['late_penalty_days']}"
+print("OK 6 lates -> 1.0 day penalty")
+
+# 34. Insights: attrition risk and absence anomalies
+ins = check("insights", client.get("/dashboards/insights", headers=hr_headers))
+for key in ("attrition_risk", "absence_anomalies", "late_penalty", "as_of"):
+    assert key in ins, f"insights missing {key}"
+assert ins["late_penalty"] == {"lates_per_penalty": 3, "penalty_days": 0.5}, ins["late_penalty"]
+
+flagged = {a["name"]: a for a in ins["absence_anomalies"]}
+assert "Omar Siddiqui" in flagged, f"6 lates should raise a flag: {list(flagged)}"
+assert any(f["flag"] == "frequent_late" for f in flagged["Omar Siddiqui"]["flags"]), flagged["Omar Siddiqui"]
+print(f"OK absence anomalies flagged {len(ins['absence_anomalies'])} employee(s)")
+
+risky = {r["name"]: r for r in ins["attrition_risk"]}
+assert all(0 < r["score"] <= 100 for r in risky.values()), risky
+assert all(len(r["factors"]) > 0 for r in risky.values()), "every score must explain itself"
+assert all(r["band"] in ("low", "medium", "high") for r in risky.values()), risky
+print(f"OK attrition risk scored {len(risky)} employee(s), each with its reasons")
+
+r = client.get("/dashboards/insights", headers=emp_headers)
+assert r.status_code == 403, r.text
+print("OK insights are Admin/HR only (employee 403)")
+
 print("\nALL SMOKE TESTS PASSED")

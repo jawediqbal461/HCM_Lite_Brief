@@ -30,6 +30,7 @@ def render_payslip_pdf(run: PayrollRun, slip: Payslip, employee: Employee, compa
         ("Absent days", f"{slip.absent_days:.1f}"),
         ("Unpaid leave days", f"{slip.unpaid_days:.1f}"),
         ("Half days", f"{slip.half_days:.1f}"),
+        ("Late penalty (days)", f"{(slip.late_penalty_days or 0):.1f}"),
         ("", ""),
         ("Basic", f"{slip.basic:,.2f}"),
         ("HRA (40%)", f"{slip.hra:,.2f}"),

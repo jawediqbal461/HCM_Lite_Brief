@@ -13,6 +13,10 @@ from app.services.attendance_service import is_weekend
 from app.services.audit_service import log_action, notify
 from app.services.leave_service import working_days_between
 
+# Bonus rule: 3 lates in a month cost half a day's pay.
+LATES_PER_PENALTY = 3
+PENALTY_DAYS = 0.5
+
 TAX_SLABS = [
     (0, 600_000, 0, 0.0),
     (600_000, 1_200_000, 0, 0.05),
@@ -68,7 +72,7 @@ def compute_payslip_fields(db: Session, settings: CompanySettings, employee: Emp
 
     unpaid_type_ids = {lt.id for lt in db.query(LeaveType).filter(LeaveType.name == "unpaid").all()}
 
-    absent_days = unpaid_days = half_days = 0.0
+    absent_days = unpaid_days = half_days = late_days = 0.0
     if window_start <= window_end:
         d = window_start
         while d <= window_end:
@@ -80,12 +84,18 @@ def compute_payslip_fields(db: Session, settings: CompanySettings, employee: Emp
                     unpaid_days += 1
                 elif status_ == "half_day":
                     half_days += 1
+                elif status_ == "late":
+                    late_days += 1
             d += timedelta(days=1)
+
+    # Bonus rule from the brief: every LATES_PER_PENALTY late arrivals in the month
+    # cost PENALTY_DAYS of pay. Partial groups do not count, so two lates cost nothing.
+    late_penalty_days = (int(late_days) // LATES_PER_PENALTY) * PENALTY_DAYS
 
     employed_working_days = working_days_between(db, settings, window_start, window_end) if window_start <= window_end else 0.0
     not_employed_days = total_working_days - employed_working_days
 
-    deduction = per_day * (not_employed_days + absent_days + unpaid_days + 0.5 * half_days)
+    deduction = per_day * (not_employed_days + absent_days + unpaid_days + 0.5 * half_days + late_penalty_days)
     present_days = total_working_days - not_employed_days - absent_days - unpaid_days - half_days
 
     tax = annual_tax(gross * 12) / 12
@@ -102,6 +112,7 @@ def compute_payslip_fields(db: Session, settings: CompanySettings, employee: Emp
         "absent_days": absent_days,
         "unpaid_days": unpaid_days,
         "half_days": half_days,
+        "late_penalty_days": late_penalty_days,
         "deductions": deduction,
         "tax": tax,
         "net_pay": net_pay,

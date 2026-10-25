@@ -99,6 +99,7 @@ export default function Payroll() {
                   <tr>
                     <th className="p-2">Employee</th>
                     <th className="p-2">Gross</th>
+                    <th className="p-2">Late penalty</th>
                     <th className="p-2">Deductions</th>
                     <th className="p-2">Tax</th>
                     <th className="p-2">Net</th>
@@ -113,6 +114,13 @@ export default function Payroll() {
                         <div className="text-xs text-slate-400">{p.employee_code}</div>
                       </td>
                       <td className="p-2">{p.gross.toFixed(2)}</td>
+                      <td className="p-2">
+                        {p.late_penalty_days ? (
+                          <span className="text-amber-700">{p.late_penalty_days} day</span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
                       <td className="p-2">{p.deductions.toFixed(2)}</td>
                       <td className="p-2">{p.tax.toFixed(2)}</td>
                       <td className="p-2 font-medium">{p.net_pay.toFixed(2)}</td>

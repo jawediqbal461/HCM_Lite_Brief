@@ -39,6 +39,7 @@ class Payslip(Base):
     unpaid_days: Mapped[float] = mapped_column(Float)
     half_days: Mapped[float] = mapped_column(Float)
 
+    late_penalty_days: Mapped[float] = mapped_column(Float, default=0)
     deductions: Mapped[float] = mapped_column(Float)
     tax: Mapped[float] = mapped_column(Float)
     net_pay: Mapped[float] = mapped_column(Float)

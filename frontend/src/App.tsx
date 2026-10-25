@@ -21,6 +21,7 @@ import Profile from "./pages/shared/Profile";
 
 import EmployeeDirectory from "./pages/shared/EmployeeDirectory";
 import Employee360 from "./pages/shared/Employee360";
+import Insights from "./pages/shared/Insights";
 import AttendanceBoard from "./pages/shared/AttendanceBoard";
 import LeaveRequests from "./pages/shared/LeaveRequests";
 import Payroll from "./pages/shared/Payroll";
@@ -42,6 +43,7 @@ export default function App() {
           <Route path="/admin/employees/:id" element={<Employee360 backTo="/admin/employees" />} />
           <Route path="/admin/attendance" element={<AttendanceBoard canDecide={false} />} />
           <Route path="/admin/leave" element={<LeaveRequests canDecide={false} />} />
+          <Route path="/admin/insights" element={<Insights employeeBase="/admin/employees" />} />
           <Route path="/admin/payroll" element={<Payroll />} />
           <Route path="/admin/audit" element={<AuditLog />} />
           <Route path="/admin/announcements" element={<Announcements />} />
@@ -56,6 +58,7 @@ export default function App() {
           <Route path="/hr/employees/:id" element={<Employee360 backTo="/hr/employees" />} />
           <Route path="/hr/attendance" element={<AttendanceBoard canDecide={true} />} />
           <Route path="/hr/leave" element={<LeaveRequests canDecide={true} />} />
+          <Route path="/hr/insights" element={<Insights employeeBase="/hr/employees" />} />
           <Route path="/hr/payroll" element={<Payroll />} />
           <Route path="/hr/announcements" element={<Announcements />} />
           <Route path="/hr/profile" element={<Profile />} />
@@ -86,6 +89,7 @@ const adminNav = [
   { to: "/admin/employees", label: "Employees" },
   { to: "/admin/attendance", label: "Attendance" },
   { to: "/admin/leave", label: "Leave records" },
+  { to: "/admin/insights", label: "Insights" },
   { to: "/admin/payroll", label: "Payroll" },
   { to: "/admin/audit", label: "Audit log" },
   { to: "/admin/announcements", label: "Announcements" },
@@ -97,6 +101,7 @@ const hrNav = [
   { to: "/hr/employees", label: "Employees" },
   { to: "/hr/attendance", label: "Attendance" },
   { to: "/hr/leave", label: "Leave approvals" },
+  { to: "/hr/insights", label: "Insights" },
   { to: "/hr/payroll", label: "Payroll" },
   { to: "/hr/announcements", label: "Announcements" },
   { to: "/hr/profile", label: "My profile" },

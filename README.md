@@ -182,7 +182,7 @@ In that split setup the two are on different domains, so you must also set `VITE
 ### 4.6 Gotchas worth knowing before demo day
 
 - **Free tiers sleep.** Managed free instances spin down when idle and take 30–60s to wake. Open the link a few minutes before demoing. (A VPS does not have this problem.)
-- **No migrations.** Tables are created with `create_all`, which does *not* ALTER existing tables. If you change a model after deploying, recreate the database — the app is designed to start empty anyway.
+- **Adding a column to a model** is handled: `ensure_additive_columns()` runs at startup and adds any missing plain columns to existing tables, so a deploy does not break a database that predates the change. Anything that needs data moved or a column dropped is **not** covered — that deserves a real migration tool. Tables themselves are still created by `create_all`.
 - **Never commit `.env`.** Only the `.env.example` files are in git; real secrets stay on the server.
 
 ## 5. What's implemented
@@ -194,7 +194,8 @@ In that split setup the two are on different domains, so you must also set `VITE
 - **Camera attendance (the brief's +10 bonus)** — browser check-in that is accepted only when exactly one face is in frame *and* the device is inside the office geofence. Face detection runs on-device with face-api.js (tiny detector, weights served from `/models`, loaded lazily so they never touch the main bundle); **no photo is stored, only the result**. Every rule is re-checked on the server — one face, GPS accuracy within 100 m, and Haversine distance within the configured radius — so the decision cannot be faked by editing the client. Admin sets the office point with one click from Company setup.
 - **Public landing page** at `/` describing the product, with Sign in, and a "Set up your company" call to action that appears only while the install is still unconfigured. There is deliberately **no public self-registration**: employee logins are created by HR, as the brief's access model requires.
 - **M5 Leave** — apply/cancel, working-days-only calculation (skips weekends & holidays), overlap and over-balance rejection (422), approval inbox with comments, balance view.
-- **M6 Payroll Lite** — salary structure, monthly draft generation (per the brief's gross/tax-slab/proration formulas), Admin-only finalize (locks the run), payslip PDF download.
+- **M6 Payroll Lite** — salary structure, monthly draft generation (per the brief's gross/tax-slab/proration formulas), Admin-only finalize (locks the run), payslip PDF download. Includes the bonus **late-penalty rule**: every 3 late arrivals in a month cost half a day's pay, shown as its own line on the payslip rather than folded silently into the total. Partial groups do not count, so two lates cost nothing.
+- **Insights (bonus)** — an Admin/HR page with **attrition risk** and **absence anomaly flags**, computed from the last 90 days. Both are explainable heuristics, never predictions: each risk score ships with the factors that produced it (absence rate, lateness, leave use, tenure, a recent rise in absence), and each anomaly says exactly what it saw — absences clustering next to weekends, repeated isolated single days, a rising trend, or frequent lateness. Nothing here decides anything on its own; it is a list of things worth a conversation.
 - **M7 Dashboards & Analytics** — all numbers computed server-side from real records, with working date-range and department filters on the Admin and HR dashboards.
   - **Admin:** headcount, attrition, payroll cost, average salary, attendance rate; charts for headcount by department, payroll cost by department, attendance trend, gender and tenure; plus a recent-activity feed from the audit log.
   - **HR:** headcount, present/on-leave/late today, attendance rate, pending approvals; charts for the attendance trend, attendance rate by department, absenteeism by department and leave days by type; top five late-comers and leave utilization against quota.
@@ -206,7 +207,8 @@ In that split setup the two are on different domains, so you must also set `VITE
 ## 6. What's not done / known gaps
 
 - **A native mobile app** is not built. Camera check-in runs in the browser instead, which the brief allows ("the same camera check can also run in the web app on a laptop or phone browser").
-- **Other bonus items** (attrition risk score, absence anomaly flags, late-penalty rule, Roman Urdu AI support, dark mode/PWA) are not implemented. The AI system prompt will already attempt to follow Roman Urdu input reasonably well since it's a general LLM, but this hasn't been tuned or tested specifically.
+- **Dark mode and PWA** are not implemented.
+- **Roman Urdu AI support** has not been tuned or tested. The assistant will likely cope reasonably since it is a general LLM, but nothing was done deliberately and no claim is made about it.
 - **Camera check-in needs HTTPS.** Browsers only expose the camera and geolocation in a secure context, so over plain `http://` the feature hides itself and explains why. The face-detection path has been exercised end to end except on a machine with no webcam, where it fails with a clear message rather than silently.
 - **Face matching against an enrolled face is not implemented** — the check confirms that exactly one face is present, not *whose* face it is. That is the brief's "extra bonus" tier; the current level is the one it asks for.
 - Payroll's day-by-day attendance/leave scan is O(days) per employee per run — fine at hackathon scale, would want a batched query for a larger company.

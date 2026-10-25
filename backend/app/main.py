@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import ai, attendance, auth, comms, dashboards, employees, leave, org, payroll
 from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.database import Base, engine, ensure_additive_columns
 from app import models  # noqa: F401 — registers all models on Base before create_all
 
 app = FastAPI(title="HCM Lite API", version="0.1.0")
@@ -12,6 +12,9 @@ app = FastAPI(title="HCM Lite API", version="0.1.0")
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
+    added = ensure_additive_columns()
+    if added:
+        print(f"Added missing columns: {', '.join(added)}")
 
 app.add_middleware(
     CORSMiddleware,

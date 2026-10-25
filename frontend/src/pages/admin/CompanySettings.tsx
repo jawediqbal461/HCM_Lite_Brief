@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api, { apiErrorMessage } from "../../api/client";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -25,9 +26,6 @@ export default function CompanySettings() {
   const [holDate, setHolDate] = useState("");
   const [holName, setHolName] = useState("");
 
-  const [hrName, setHrName] = useState("");
-  const [hrEmail, setHrEmail] = useState("");
-  const [hrPassword, setHrPassword] = useState("");
 
   function loadAll() {
     api.get("/org/settings").then((r) => setSettings(r.data));
@@ -84,18 +82,6 @@ export default function CompanySettings() {
     setHolDate("");
     setHolName("");
     loadAll();
-  }
-  async function createHr(e: FormEvent) {
-    e.preventDefault();
-    try {
-      await api.post("/org/hr-users", { full_name: hrName, email: hrEmail, password: hrPassword });
-      setMsg(`HR login created for ${hrEmail}`);
-      setHrName("");
-      setHrEmail("");
-      setHrPassword("");
-    } catch (err) {
-      setMsg(apiErrorMessage(err));
-    }
   }
 
   if (!settings) return <div>Loading...</div>;
@@ -260,13 +246,14 @@ export default function CompanySettings() {
         </Section>
       </div>
 
-      <Section title="Create HR login">
-        <form onSubmit={createHr} className="grid grid-cols-3 gap-2">
-          <input className="border rounded px-2 py-1 text-sm" placeholder="Full name" value={hrName} onChange={(e) => setHrName(e.target.value)} required />
-          <input type="email" className="border rounded px-2 py-1 text-sm" placeholder="Email" value={hrEmail} onChange={(e) => setHrEmail(e.target.value)} required />
-          <input type="password" className="border rounded px-2 py-1 text-sm" placeholder="Temp password" value={hrPassword} onChange={(e) => setHrPassword(e.target.value)} required />
-          <button className="col-span-3 bg-brand text-white rounded px-4 py-1.5 text-sm">Create HR login</button>
-        </form>
+      <Section title="Logins">
+        <p className="text-sm text-slate-500">
+          HR logins, role changes, password resets and deactivation live on the{" "}
+          <Link to="/admin/users" className="text-brand underline">
+            Users &amp; access
+          </Link>{" "}
+          page.
+        </p>
       </Section>
     </div>
   );

@@ -19,3 +19,11 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     employee: Mapped["Employee"] = relationship(back_populates="user", foreign_keys=[employee_id])
+
+    @property
+    def employee_name(self) -> str | None:
+        return self.employee.full_name if self.employee else None
+
+    @property
+    def employee_code(self) -> str | None:
+        return self.employee.code if self.employee else None

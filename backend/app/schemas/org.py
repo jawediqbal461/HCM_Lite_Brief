@@ -81,3 +81,21 @@ class HRUserCreate(BaseModel):
     full_name: str
     email: str
     password: str
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    role: str
+    is_active: bool
+    must_change_password: bool
+    employee_id: int | None = None
+    employee_name: str | None = None
+    employee_code: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class RoleChange(BaseModel):
+    role: str

@@ -71,11 +71,54 @@ def create_hr_user(db: Session, actor_id: int, full_name: str, email: str, passw
 
 
 def set_user_active(db: Session, actor_id: int, user: User, active: bool):
+    if not active:
+        if user.id == actor_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "You cannot deactivate your own login")
+        if user.role == "admin" and _active_admin_count(db, excluding_user_id=user.id) == 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "This is the last active Admin and cannot be deactivated")
+
     before = {"is_active": user.is_active}
     user.is_active = active
     db.flush()
     log_action(db, actor_id, "update", "user", user.id, before=before, after={"is_active": active})
     db.commit()
+
+
+VALID_ROLES = ("admin", "hr", "employee")
+
+
+def _active_admin_count(db: Session, excluding_user_id: int | None = None) -> int:
+    query = db.query(User).filter(User.role == "admin", User.is_active.is_(True))
+    if excluding_user_id is not None:
+        query = query.filter(User.id != excluding_user_id)
+    return query.count()
+
+
+def change_user_role(db: Session, actor_id: int, user: User, new_role: str) -> User:
+    if new_role not in VALID_ROLES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Role must be one of {', '.join(VALID_ROLES)}")
+    if user.id == actor_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "You cannot change your own role")
+    if user.role == new_role:
+        return user
+
+    # An "employee" reads rows by employee_id, so a login with no employee record
+    # would land in a broken state where most of its own pages fail.
+    if new_role == "employee" and user.employee_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This login is not linked to an employee record, so it cannot become an Employee.",
+        )
+    if user.role == "admin" and _active_admin_count(db, excluding_user_id=user.id) == 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This is the last active Admin; promote someone else first")
+
+    before = {"role": user.role}
+    user.role = new_role
+    db.flush()
+    log_action(db, actor_id, "update", "user", user.id, before=before, after={"role": new_role})
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def reset_user_password(db: Session, actor_id: int, user: User) -> str:

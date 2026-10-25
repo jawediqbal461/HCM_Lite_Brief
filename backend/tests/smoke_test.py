@@ -478,4 +478,66 @@ r = client.post(
 assert r.status_code == 422, f"expected 422, got {r.status_code} {r.text[:200]}"
 print("OK API rejects a camera check-in with no face (422)")
 
+# 30. User & access management, including the guards that stop a lock-out
+users = check("list users", client.get("/org/users", headers=admin_headers))
+by_email = {u["email"]: u for u in users}
+assert {"admin@acme.com", "hr@acme.com", "jane@acme.com"} <= set(by_email), by_email.keys()
+assert by_email["jane@acme.com"]["employee_name"] == "Jane Doe", by_email["jane@acme.com"]
+assert by_email["hr@acme.com"]["employee_id"] is None, by_email["hr@acme.com"]
+print(f"OK admin can list {len(users)} logins with their linked employees")
+
+r = client.get("/org/users", headers=hr_headers)
+assert r.status_code == 403, r.text
+r = client.get("/org/users", headers=emp_headers)
+assert r.status_code == 403, r.text
+print("OK user list is Admin-only (HR and Employee both 403)")
+
+admin_user = by_email["admin@acme.com"]
+hr_user = by_email["hr@acme.com"]
+jane_user = by_email["jane@acme.com"]
+
+# An admin must not be able to strand the company without an admin.
+r = client.patch(f"/org/users/{admin_user['id']}/role", headers=admin_headers, json={"role": "hr"})
+assert r.status_code == 400 and "own role" in r.json()["detail"].lower(), r.text
+print("OK admin cannot change their own role")
+
+r = client.post(f"/org/users/{admin_user['id']}/deactivate", headers=admin_headers)
+assert r.status_code == 400 and "own login" in r.json()["detail"].lower(), r.text
+print("OK admin cannot deactivate their own login")
+
+# An HR login has no employee record, so it cannot become an Employee.
+r = client.patch(f"/org/users/{hr_user['id']}/role", headers=hr_headers, json={"role": "employee"})
+assert r.status_code == 403, r.text
+r = client.patch(f"/org/users/{hr_user['id']}/role", headers=admin_headers, json={"role": "employee"})
+assert r.status_code == 400 and "employee record" in r.json()["detail"].lower(), r.text
+print("OK a login with no employee record cannot be made an Employee")
+
+r = client.patch(f"/org/users/{hr_user['id']}/role", headers=admin_headers, json={"role": "owner"})
+assert r.status_code == 400, r.text
+print("OK unknown roles are rejected")
+
+# A real promotion and demotion round-trip.
+d = check("promote employee to hr", client.patch(f"/org/users/{jane_user['id']}/role", headers=admin_headers, json={"role": "hr"}))
+assert d["role"] == "hr", d
+d = check("demote back to employee", client.patch(f"/org/users/{jane_user['id']}/role", headers=admin_headers, json={"role": "employee"}))
+assert d["role"] == "employee", d
+print("OK role can be changed both ways for a login with an employee record")
+
+# Deactivate blocks sign-in, reactivate restores it.
+check("deactivate hr", client.post(f"/org/users/{hr_user['id']}/deactivate", headers=admin_headers))
+r = client.post("/auth/login", json={"email": "hr@acme.com", "password": "HrPass456!"})
+assert r.status_code == 401, f"deactivated login still works: {r.text}"
+check("reactivate hr", client.post(f"/org/users/{hr_user['id']}/reactivate", headers=admin_headers))
+check("hr can sign in again", client.post("/auth/login", json={"email": "hr@acme.com", "password": "HrPass456!"}))
+print("OK deactivation blocks sign-in and reactivation restores it")
+
+# Password reset issues a working temporary password that must be changed.
+d = check("reset hr password", client.post(f"/org/users/{hr_user['id']}/reset-password", headers=admin_headers))
+temp = d["temporary_password"]
+r = client.post("/auth/login", json={"email": "hr@acme.com", "password": "HrPass456!"})
+assert r.status_code == 401, "the old password still works after a reset"
+d = check("sign in with the temporary password", client.post("/auth/login", json={"email": "hr@acme.com", "password": temp}))
+assert d["must_change_password"] is True, d
+print("OK password reset invalidates the old password and forces a change")
+
 print("\nALL SMOKE TESTS PASSED")

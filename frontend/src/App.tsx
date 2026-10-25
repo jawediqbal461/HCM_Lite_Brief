@@ -8,6 +8,7 @@ import ChangePassword from "./pages/ChangePassword";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import CompanySettings from "./pages/admin/CompanySettings";
+import UserAccess from "./pages/admin/UserAccess";
 import AuditLog from "./pages/admin/AuditLog";
 
 import HRDashboard from "./pages/hr/HRDashboard";
@@ -36,6 +37,7 @@ export default function App() {
         <Route element={<Layout title="Admin" nav={adminNav} />}>
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/settings" element={<CompanySettings />} />
+          <Route path="/admin/users" element={<UserAccess />} />
           <Route path="/admin/employees" element={<EmployeeDirectory canManage={false} detailBase="/admin/employees" />} />
           <Route path="/admin/employees/:id" element={<Employee360 backTo="/admin/employees" />} />
           <Route path="/admin/attendance" element={<AttendanceBoard canDecide={false} />} />
@@ -78,6 +80,7 @@ export default function App() {
 const adminNav = [
   { to: "/admin", label: "Dashboard" },
   { to: "/admin/settings", label: "Company setup" },
+  { to: "/admin/users", label: "Users & access" },
   { to: "/admin/employees", label: "Employees" },
   { to: "/admin/attendance", label: "Attendance" },
   { to: "/admin/leave", label: "Leave records" },

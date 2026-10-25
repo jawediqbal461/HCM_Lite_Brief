@@ -16,6 +16,8 @@ from app.schemas.org import (
     HRUserCreate,
     LeaveTypeIn,
     LeaveTypeOut,
+    RoleChange,
+    UserOut,
 )
 from app.services import auth_service, org_service
 
@@ -84,6 +86,19 @@ def create_holiday(payload: HolidayIn, current: CurrentUser = Depends(require_ad
 def create_hr_user(payload: HRUserCreate, current: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)):
     user = auth_service.create_hr_user(db, current.id, payload.full_name, payload.email, payload.password)
     return {"id": user.id, "email": user.email}
+
+
+@router.get("/users", response_model=list[UserOut])
+def list_users(current: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)):
+    return db.query(User).order_by(User.role, User.email).all()
+
+
+@router.patch("/users/{user_id}/role", response_model=UserOut)
+def change_user_role(user_id: int, payload: RoleChange, current: CurrentUser = Depends(require_admin), db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    return auth_service.change_user_role(db, current.id, user, payload.role)
 
 
 @router.post("/users/{user_id}/deactivate")

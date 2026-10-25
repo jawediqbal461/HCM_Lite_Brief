@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     ai_provider: str = "anthropic"
     ai_api_key: str | None = None
     ai_model: str = "claude-sonnet-4-5"
+    # Any OpenAI-compatible endpoint (xAI/Grok, Groq, Together, a local server).
+    # Leave unset for OpenAI itself; ignored when the provider is anthropic.
+    ai_base_url: str | None = None
 
     # Comma-separated so a deployment can allow its hosted frontend alongside local dev.
     frontend_origin: str = "http://localhost:5173"

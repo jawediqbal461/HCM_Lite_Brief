@@ -27,7 +27,11 @@ def _openai_client():
 
     if not settings.ai_api_key:
         raise AIError("AI_API_KEY is not configured")
-    return OpenAI(api_key=settings.ai_api_key, timeout=REQUEST_TIMEOUT_SECONDS)
+    kwargs = {"api_key": settings.ai_api_key, "timeout": REQUEST_TIMEOUT_SECONDS}
+    if settings.ai_base_url:
+        # Points the same client at any OpenAI-compatible provider, e.g. xAI/Grok.
+        kwargs["base_url"] = settings.ai_base_url
+    return OpenAI(**kwargs)
 
 
 def _anthropic_tools():

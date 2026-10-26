@@ -201,7 +201,15 @@ In that split setup the two are on different domains, so you must also set `VITE
   | Payroll run | department | — | ✅ |
   | My attendance / leave / payslips | month, year, status, type | — | — |
 
-  Every export honours the filters currently applied, so what downloads is what you are looking at, and each one stays inside the caller's role. **Employee 360**: click any name in the directory for one page with their profile, last 30 days of attendance, full leave history and payslips (with PDF download).
+  Every export honours the filters currently applied, so what downloads is what you are looking at, and each one stays inside the caller's role.
+- **Reports** — period summaries with totals, each exportable to CSV, listed per role so nobody is offered a report they cannot run:
+
+  | Role | Reports |
+  |---|---|
+  | Admin & HR | Attendance register, Leave register, Late arrivals, Payroll register, Headcount & attrition |
+  | Employee | My attendance, My leave statement, My payslip history |
+
+  All eight share one response shape (columns, rows, totals), so a single screen renders any of them and one endpoint exports any of them — adding a report means writing one function. Parameters follow the report: a register asks for a date range, payroll asks for a month, a statement asks for a year. The late-arrivals report uses the same rule as payroll, so the penalty days it shows are the ones actually deducted. **Employee 360**: click any name in the directory for one page with their profile, last 30 days of attendance, full leave history and payslips (with PDF download).
 - **M4 Attendance** — web check-in/out, late/half-day/missing-checkout status rules, one record per employee per day, attendance corrections (request + approve/reject). The **daily board shows every employee** for the chosen day, not just those who checked in: people with no record are derived as on-leave, weekend/holiday or absent, with a per-status count across the top and a date picker for past days.
 - **Camera attendance (the brief's +10 bonus)** — browser check-in that is accepted only when exactly one face is in frame *and* the device is inside the office geofence. Face detection runs on-device with face-api.js (tiny detector, weights served from `/models`, loaded lazily so they never touch the main bundle); **no photo is stored, only the result**. Every rule is re-checked on the server — one face, GPS accuracy within 100 m, and Haversine distance within the configured radius — so the decision cannot be faked by editing the client. Admin sets the office point with one click from Company setup.
 - **Public landing page** at `/` describing the product, with Sign in, and a "Set up your company" call to action that appears only while the install is still unconfigured. There is deliberately **no public self-registration**: employee logins are created by HR, as the brief's access model requires.

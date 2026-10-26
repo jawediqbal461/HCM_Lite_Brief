@@ -716,4 +716,69 @@ slips_year = check("my payslips by year", client.get("/payroll/payslips/mine", h
 assert slips_year == [], slips_year
 print("OK employee leave and payslip filters work on their own data")
 
+# 37. Reports — each role sees only its own, and the numbers match the records
+staff_reports = check("reports list (HR)", client.get("/reports", headers=hr_headers))["reports"]
+staff_keys = {r["key"] for r in staff_reports}
+assert staff_keys == {"attendance-register", "leave-register", "late-comers", "payroll-register", "headcount"}, staff_keys
+
+emp_reports = check("reports list (employee)", client.get("/reports", headers=emp_headers))["reports"]
+emp_keys = {r["key"] for r in emp_reports}
+assert emp_keys == {"my-attendance", "my-leave", "my-payslips"}, emp_keys
+print(f"OK reports are role-scoped: staff {len(staff_keys)}, employee {len(emp_keys)}")
+
+# An employee must not be able to run a staff report by guessing its name.
+r = client.get("/reports/attendance-register", headers=emp_headers)
+assert r.status_code == 403, r.text
+r = client.get("/reports/payroll-register/export-csv", headers=emp_headers)
+assert r.status_code == 403, r.text
+# ...and staff cannot run the self-scoped ones, which have no employee to scope to.
+r = client.get("/reports/my-payslips", headers=hr_headers)
+assert r.status_code == 403, r.text
+print("OK reports refuse the wrong role, including the CSV route")
+
+r = client.get("/reports/not-a-report", headers=hr_headers)
+assert r.status_code == 404, r.text
+
+# Attendance register over the window we know: Jane present+half, Omar 6 lates.
+reg = check(
+    "attendance register",
+    client.get("/reports/attendance-register", headers=hr_headers, params={"start": "2026-10-01", "end": "2026-10-20"}),
+)
+assert {c["key"] for c in reg["columns"]} >= {"employee", "present", "late", "absent", "attendance_rate"}, reg["columns"]
+rows = {r["employee"]: r for r in reg["rows"]}
+assert rows["Omar Siddiqui"]["late"] == 6, rows["Omar Siddiqui"]
+assert reg["totals"]["late"] == 6, reg["totals"]
+assert 0 <= reg["totals"]["attendance_rate"] <= 100, reg["totals"]
+print(f"OK attendance register: Omar {rows['Omar Siddiqui']['late']} lates, overall rate {reg['totals']['attendance_rate']}%")
+
+late = check("late-comers report", client.get("/reports/late-comers", headers=hr_headers, params={"start": "2026-10-01", "end": "2026-10-20"}))
+assert late["rows"][0]["employee"] == "Omar Siddiqui" and late["rows"][0]["penalty_days"] == 1.0, late["rows"]
+print("OK late-comers report matches the payroll penalty (6 lates -> 1.0 day)")
+
+leave_reg = check("leave register", client.get("/reports/leave-register", headers=hr_headers, params={"start": "2026-11-01", "end": "2026-11-30"}))
+assert leave_reg["totals"]["total"] == 2.0, leave_reg["totals"]
+print("OK leave register totals the approved days")
+
+head = check("headcount report", client.get("/reports/headcount", headers=hr_headers, params={"start": "2026-01-01", "end": "2026-12-31"}))
+assert head["totals"]["headcount"] >= 2 and head["totals"]["joiners"] >= 2, head["totals"]
+print(f"OK headcount report: {head['totals']['headcount']} active, {head['totals']['joiners']} joined")
+
+pay = check("payroll register", client.get("/reports/payroll-register", headers=hr_headers, params={"month": 10, "year": 2026}))
+assert len(pay["rows"]) >= 1 and "net_pay" in pay["totals"], pay
+missing = check("payroll register, month with no run", client.get("/reports/payroll-register", headers=hr_headers, params={"month": 7, "year": 2026}))
+assert missing["rows"] == [] and "No payroll run" in missing["subtitle"], missing
+print("OK payroll register reports a month with no run instead of failing")
+
+# Employee reports stay on their own data.
+mine = check("my leave statement", client.get("/reports/my-leave", headers=emp_headers, params={"year": 2026}))
+assert mine["totals"]["used"] == 2.0, mine["totals"]
+mine_att = check("my attendance report", client.get("/reports/my-attendance", headers=emp_headers, params={"start": "2026-10-01", "end": "2026-10-10"}))
+assert len(mine_att["rows"]) > 0 and {"date", "status"} == {c["key"] for c in mine_att["columns"]}, mine_att["columns"]
+print("OK employee reports return only their own records")
+
+csv_report = client.get("/reports/attendance-register/export-csv", headers=hr_headers, params={"start": "2026-10-01", "end": "2026-10-20"})
+assert csv_report.status_code == 200 and "Employee,Code,Department" in csv_report.text, csv_report.text[:150]
+assert "Omar Siddiqui" in csv_report.text, csv_report.text[:300]
+print("OK report CSV export carries the same rows")
+
 print("\nALL SMOKE TESTS PASSED")

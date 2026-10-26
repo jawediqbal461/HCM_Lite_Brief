@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import api from "../../api/client";
+import api, { downloadCsv } from "../../api/client";
 
 const STATUS_STYLES: Record<string, string> = {
   present: "bg-green-100 text-green-800",
@@ -28,17 +28,31 @@ export default function AttendanceBoard({ canDecide }: { canDecide: boolean }) {
   const [day, setDay] = useState(todayISO);
   const [rows, setRows] = useState<any[]>([]);
   const [corrections, setCorrections] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [filters, setFilters] = useState({ department_id: "", status: "", search: "" });
 
-  function load(forDay: string) {
-    api.get("/attendance/board", { params: { day: forDay } }).then((r) => setRows(r.data));
+  const params = (forDay: string, f = filters) => ({
+    day: forDay,
+    department_id: f.department_id ? Number(f.department_id) : undefined,
+    status: f.status || undefined,
+    search: f.search || undefined,
+  });
+
+  function load(forDay: string, f = filters) {
+    api.get("/attendance/board", { params: params(forDay, f) }).then((r) => setRows(r.data));
     api.get("/attendance/corrections/pending").then((r) => setCorrections(r.data));
   }
   useEffect(() => load(day), [day]);
+  useEffect(() => {
+    api.get("/org/departments").then((r) => setDepartments(r.data)).catch(() => {});
+  }, []);
 
   async function decide(id: number, approve: boolean) {
     await api.post(`/attendance/corrections/${id}/decide`, { approve });
     load(day);
   }
+
+  const STATUS_OPTIONS = ["present", "late", "half_day", "missing_checkout", "on_leave", "absent", "weekend", "holiday"];
 
   const summary = rows.reduce<Record<string, number>>((acc, row) => {
     acc[row.status] = (acc[row.status] || 0) + 1;
@@ -49,10 +63,70 @@ export default function AttendanceBoard({ canDecide }: { canDecide: boolean }) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-brand-dark">Daily attendance</h1>
+        <div className="flex items-center gap-3">
+          <label className="text-sm">
+            Day{" "}
+            <input type="date" className="border rounded px-2 py-1" value={day} onChange={(e) => setDay(e.target.value)} />
+          </label>
+          <button
+            className="text-sm text-brand underline"
+            onClick={() => downloadCsv("/attendance/board/export-csv", `attendance-${day}.csv`, params(day))}
+          >
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-4 flex flex-wrap items-end gap-3">
         <label className="text-sm">
-          Day{" "}
-          <input type="date" className="border rounded px-2 py-1" value={day} onChange={(e) => setDay(e.target.value)} />
+          Search
+          <input
+            className="block border rounded px-2 py-1"
+            placeholder="Name or code"
+            value={filters.search}
+            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+          />
         </label>
+        <label className="text-sm">
+          Department
+          <select
+            className="block border rounded px-2 py-1"
+            value={filters.department_id}
+            onChange={(e) => setFilters({ ...filters, department_id: e.target.value })}
+          >
+            <option value="">All</option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          Status
+          <select className="block border rounded px-2 py-1" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+            <option value="">All</option>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {s.replace("_", " ")}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="bg-brand text-white rounded px-4 py-1.5 text-sm" onClick={() => load(day, filters)}>
+          Apply
+        </button>
+        <button
+          type="button"
+          className="text-sm text-slate-500 underline"
+          onClick={() => {
+            const cleared = { department_id: "", status: "", search: "" };
+            setFilters(cleared);
+            load(day, cleared);
+          }}
+        >
+          Reset
+        </button>
       </div>
 
       <div className="flex flex-wrap gap-2">

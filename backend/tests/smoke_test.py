@@ -249,7 +249,7 @@ db.close()
 # 21. Admin can view attendance corrections and all leave records
 check("admin views corrections", client.get("/attendance/corrections/pending", headers=admin_headers))
 d = check("admin views all leave", client.get("/leave", headers=admin_headers))
-assert len(d) == 1, f"expected the approved leave record, got {d}"
+assert d["total"] == 1, f"expected the approved leave record, got {d}"
 r = client.get("/leave", headers=emp_headers)
 assert r.status_code == 403, r.text
 print("OK RBAC: employee blocked from all-leave records (403)")
@@ -328,7 +328,7 @@ assert board[0]["employee_name"] == "Jane Doe" and board[0]["employee_code"] == 
 assert board[0]["department"] == "Engineering", board[0]
 print(f"OK board shows names: {board[0]['employee_name']} ({board[0]['department']})")
 
-leave_rows = check("leave records carry names", client.get("/leave", headers=admin_headers))
+leave_rows = check("leave records carry names", client.get("/leave", headers=admin_headers))["items"]
 assert leave_rows[0]["employee_name"] == "Jane Doe", leave_rows[0]
 assert leave_rows[0]["leave_type_name"] == "casual", leave_rows[0]
 
@@ -410,9 +410,9 @@ print("OK attendance rate stable after board load (15.0% across 2 employees)")
 check("360 profile", client.get(f"/employees/{employee_id}", headers=hr_headers))
 check("360 attendance", client.get("/attendance/calendar", headers=hr_headers, params={"employee_id": employee_id, "start": "2026-10-01", "end": "2026-10-31"}))
 emp_leave = check("360 leave", client.get("/leave", headers=hr_headers, params={"employee_id": employee_id}))
-assert len(emp_leave) == 1 and emp_leave[0]["employee_id"] == employee_id, emp_leave
+assert emp_leave["total"] == 1 and emp_leave["items"][0]["employee_id"] == employee_id, emp_leave
 other_leave = check("360 leave for other employee", client.get("/leave", headers=hr_headers, params={"employee_id": second_id}))
-assert other_leave == [], other_leave
+assert other_leave["total"] == 0, other_leave
 emp_slips = check("360 payslips", client.get("/payroll/payslips", headers=hr_headers, params={"employee_id": employee_id}))
 assert len(emp_slips) == 1, emp_slips
 r = client.get("/payroll/payslips", headers=emp_headers, params={"employee_id": employee_id})
@@ -645,5 +645,75 @@ print(f"OK attrition risk scored {len(risky)} employee(s), each with its reasons
 r = client.get("/dashboards/insights", headers=emp_headers)
 assert r.status_code == 403, r.text
 print("OK insights are Admin/HR only (employee 403)")
+
+# 35. Filters, pagination and CSV exports on the data tables
+emps = check("employees paged", client.get("/employees", headers=hr_headers, params={"page": 1, "page_size": 1}))
+assert len(emps["items"]) == 1 and emps["total"] >= 2, emps
+page2 = check("employees page 2", client.get("/employees", headers=hr_headers, params={"page": 2, "page_size": 1}))
+assert page2["items"][0]["id"] != emps["items"][0]["id"], "page 2 returned the same row as page 1"
+print(f"OK employees paginate ({emps['total']} total, 1 per page)")
+
+by_dept = check("employees by department", client.get("/employees", headers=hr_headers, params={"department_id": dept_id}))
+assert by_dept["total"] >= 2, by_dept
+empty = check("employees in a dept with nobody", client.get("/employees", headers=hr_headers, params={"department_id": dept_id + 999}))
+assert empty["total"] == 0, empty
+named = check("employee search", client.get("/employees", headers=hr_headers, params={"search": "Omar"}))
+assert named["total"] == 1 and named["items"][0]["full_name"] == "Omar Siddiqui", named
+print("OK employee search and department filters narrow results")
+
+approved = check("leave filtered by status", client.get("/leave", headers=admin_headers, params={"status": "approved"}))
+assert all(r["status"] == "approved" for r in approved["items"]), approved
+none_pending = check("leave filtered to pending", client.get("/leave", headers=admin_headers, params={"status": "pending"}))
+assert none_pending["total"] == 0, none_pending
+ranged = check("leave filtered by date", client.get("/leave", headers=admin_headers, params={"start": "2026-11-01", "end": "2026-11-30"}))
+assert ranged["total"] == 1, ranged
+outside = check("leave outside the range", client.get("/leave", headers=admin_headers, params={"start": "2026-01-01", "end": "2026-01-31"}))
+assert outside["total"] == 0, outside
+print("OK leave filters by status and overlapping date range")
+
+board_all = check("board unfiltered", client.get("/attendance/board", headers=hr_headers, params={"day": "2026-10-07"}))
+board_one = check("board filtered by name", client.get("/attendance/board", headers=hr_headers, params={"day": "2026-10-07", "search": "Omar"}))
+assert len(board_all) > len(board_one) and len(board_one) == 1, (len(board_all), len(board_one))
+board_absent = check("board filtered by status", client.get("/attendance/board", headers=hr_headers, params={"day": "2026-10-07", "status": "absent"}))
+assert all(r["status"] == "absent" for r in board_absent), board_absent
+print("OK attendance board filters by search and status")
+
+audit = check("audit paged", client.get("/audit-log", headers=admin_headers, params={"page_size": 5}))
+assert len(audit["items"]) <= 5 and audit["total"] > 5, audit
+opts = check("audit filter options", client.get("/audit-log/filters", headers=admin_headers))
+assert "create" in opts["actions"] and "employee" in opts["entities"], opts
+only_finalize = check("audit filtered", client.get("/audit-log", headers=admin_headers, params={"action": "finalize"}))
+assert only_finalize["total"] >= 1 and all(r["action"] == "finalize" for r in only_finalize["items"]), only_finalize
+print(f"OK audit log pages and filters ({audit['total']} entries, actions: {opts['actions']})")
+
+# CSV exports return real CSV with the filters applied, and stay role-scoped.
+csv_emp = client.get("/employees/export-csv", headers=hr_headers)
+assert csv_emp.status_code == 200 and "code,full_name" in csv_emp.text, csv_emp.text[:120]
+csv_leave = client.get("/leave/export-csv", headers=admin_headers)
+assert csv_leave.status_code == 200 and "employee_code,employee,type" in csv_leave.text, csv_leave.text[:120]
+assert "Jane Doe" in csv_leave.text, csv_leave.text[:200]
+csv_att = client.get("/attendance/board/export-csv", headers=hr_headers, params={"day": "2026-10-07"})
+assert csv_att.status_code == 200 and "date,employee_code" in csv_att.text, csv_att.text[:120]
+csv_audit = client.get("/audit-log/export-csv", headers=admin_headers)
+assert csv_audit.status_code == 200 and "when,actor_id,action" in csv_audit.text, csv_audit.text[:120]
+csv_pay = client.get(f"/payroll/runs/{run_id}/export-csv", headers=hr_headers)
+assert csv_pay.status_code == 200 and "late_penalty_days" in csv_pay.text, csv_pay.text[:160]
+print("OK CSV exports for employees, leave, attendance, audit and payroll")
+
+for path in ("/leave/export-csv", "/attendance/board/export-csv"):
+    r = client.get(path, headers=emp_headers)
+    assert r.status_code == 403, f"{path} should be staff-only, got {r.status_code}"
+r = client.get("/audit-log/export-csv", headers=hr_headers)
+assert r.status_code == 403, r.text
+print("OK exports respect roles (employee blocked, audit export Admin-only)")
+
+# 36. Employee self-service filters
+mine_year = check("my leave by year", client.get("/leave/mine", headers=emp_headers, params={"year": 2026}))
+assert len(mine_year) >= 1, mine_year
+mine_other = check("my leave, different year", client.get("/leave/mine", headers=emp_headers, params={"year": 2020}))
+assert mine_other == [], mine_other
+slips_year = check("my payslips by year", client.get("/payroll/payslips/mine", headers=emp_headers, params={"year": 2020}))
+assert slips_year == [], slips_year
+print("OK employee leave and payslip filters work on their own data")
 
 print("\nALL SMOKE TESTS PASSED")

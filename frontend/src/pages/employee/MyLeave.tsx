@@ -12,10 +12,19 @@ export default function MyLeave() {
   const [smartLoading, setSmartLoading] = useState(false);
 
   const [form, setForm] = useState({ leave_type_id: "", start_date: "", end_date: "", reason: "" });
+  const [mineFilters, setMineFilters] = useState({ year: String(new Date().getFullYear()), status: "", leave_type_id: "" });
 
-  function load() {
+  function load(f = mineFilters) {
     api.get("/leave/balance").then((r) => setBalance(r.data));
-    api.get("/leave/mine").then((r) => setMine(r.data));
+    api
+      .get("/leave/mine", {
+        params: {
+          year: f.year ? Number(f.year) : undefined,
+          status: f.status || undefined,
+          leave_type_id: f.leave_type_id ? Number(f.leave_type_id) : undefined,
+        },
+      })
+      .then((r) => setMine(r.data));
     api.get("/org/leave-types").then((r) => setLeaveTypes(r.data)).catch(() => {});
   }
   useEffect(load, []);
@@ -117,7 +126,52 @@ export default function MyLeave() {
       </div>
 
       <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-semibold mb-2">My requests</h2>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <h2 className="font-semibold">My requests</h2>
+          <div className="flex items-end gap-2">
+            <label className="text-sm">
+              Year
+              <input
+                className="block border rounded px-2 py-1 w-24"
+                value={mineFilters.year}
+                onChange={(e) => setMineFilters({ ...mineFilters, year: e.target.value })}
+              />
+            </label>
+            <label className="text-sm">
+              Status
+              <select
+                className="block border rounded px-2 py-1"
+                value={mineFilters.status}
+                onChange={(e) => setMineFilters({ ...mineFilters, status: e.target.value })}
+              >
+                <option value="">All</option>
+                {["pending", "approved", "rejected", "cancelled"].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              Type
+              <select
+                className="block border rounded px-2 py-1"
+                value={mineFilters.leave_type_id}
+                onChange={(e) => setMineFilters({ ...mineFilters, leave_type_id: e.target.value })}
+              >
+                <option value="">All</option>
+                {leaveTypes.map((lt) => (
+                  <option key={lt.id} value={lt.id}>
+                    {lt.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="bg-brand text-white rounded px-3 py-1.5 text-sm" onClick={() => load(mineFilters)}>
+              Apply
+            </button>
+          </div>
+        </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>

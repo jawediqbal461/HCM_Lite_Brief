@@ -4,9 +4,12 @@ import api from "../../api/client";
 export default function MyPayslips() {
   const [items, setItems] = useState<any[]>([]);
 
-  useEffect(() => {
-    api.get("/payroll/payslips/mine").then((r) => setItems(r.data));
-  }, []);
+  const [year, setYear] = useState("");
+
+  function load(y = year) {
+    api.get("/payroll/payslips/mine", { params: { year: y ? Number(y) : undefined } }).then((r) => setItems(r.data));
+  }
+  useEffect(() => load(), []);
 
   async function download(id: number) {
     const res = await api.get(`/payroll/payslips/${id}/pdf`, { responseType: "blob" });
@@ -19,7 +22,18 @@ export default function MyPayslips() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold text-brand-dark">My payslips</h1>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h1 className="text-2xl font-bold text-brand-dark">My payslips</h1>
+        <div className="flex items-end gap-2">
+          <label className="text-sm">
+            Year
+            <input className="block border rounded px-2 py-1 w-28" placeholder="All years" value={year} onChange={(e) => setYear(e.target.value)} />
+          </label>
+          <button className="bg-brand text-white rounded px-3 py-1.5 text-sm" onClick={() => load(year)}>
+            Apply
+          </button>
+        </div>
+      </div>
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">

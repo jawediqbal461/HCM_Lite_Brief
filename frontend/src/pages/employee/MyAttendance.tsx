@@ -5,23 +5,24 @@ import CameraCheckIn from "../../components/CameraCheckIn";
 export default function MyAttendance() {
   const [today, setToday] = useState<any>(null);
   const [calendar, setCalendar] = useState<any[]>([]);
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [msg, setMsg] = useState("");
   const [corrDate, setCorrDate] = useState("");
   const [corrReason, setCorrReason] = useState("");
 
-  function load() {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(start.getDate() - 30);
+  function load(forMonth = month) {
+    const [y, m] = forMonth.split("-").map(Number);
+    const start = `${forMonth}-01`;
+    const end = new Date(y, m, 0).toISOString().slice(0, 10);
+    api.get("/attendance/calendar", { params: { start, end } }).then((r) => setCalendar(r.data));
+
+    // "Today" is read separately so it stays right even when browsing an old month.
+    const todayStr = new Date().toISOString().slice(0, 10);
     api
-      .get("/attendance/calendar", { params: { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) } })
-      .then((r) => {
-        setCalendar(r.data);
-        const todayStr = end.toISOString().slice(0, 10);
-        setToday(r.data.find((d: any) => d.date === todayStr) || null);
-      });
+      .get("/attendance/calendar", { params: { start: todayStr, end: todayStr } })
+      .then((r) => setToday(r.data[0] || null));
   }
-  useEffect(load, []);
+  useEffect(() => load(month), [month]);
 
   async function checkIn() {
     setMsg("");
@@ -76,7 +77,13 @@ export default function MyAttendance() {
       <CameraCheckIn onCheckedIn={load} />
 
       <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-semibold mb-2">Last 30 days</h2>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <h2 className="font-semibold">My attendance</h2>
+          <label className="text-sm">
+            Month{" "}
+            <input type="month" className="border rounded px-2 py-1" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </label>
+        </div>
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>

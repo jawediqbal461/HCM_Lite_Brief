@@ -1,12 +1,15 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, require_admin_or_hr, require_any, require_hr
 from app.core.database import get_db
 from app.models.attendance import Attendance
 from app.models.employee import Employee
+from app.models.org import Department
+from app.services import export_service
 from app.core.clock import business_today
 from app.schemas.attendance import (
     AttendanceBoardRow,
@@ -52,12 +55,46 @@ def check_out(current: CurrentUser = Depends(require_any), db: Session = Depends
     return attendance_service.check_out(db, settings, employee)
 
 
-@router.get("/board", response_model=list[AttendanceBoardRow])
-def board(day: date | None = None, current: CurrentUser = Depends(require_admin_or_hr), db: Session = Depends(get_db)):
+def _board_rows(db: Session, day: date | None, department_id: int | None, status_filter: str | None, search: str | None):
     settings = org_service.get_settings(db)
     today = business_today(settings)
     attendance_service.finalize_missing_checkouts(db, today)
-    return attendance_service.daily_board(db, settings, day or today)
+    rows = attendance_service.daily_board(db, settings, day or today)
+
+    if department_id:
+        names = {d.id: d.name for d in db.query(Department).all()}
+        wanted = names.get(department_id)
+        rows = [r for r in rows if r["department"] == wanted]
+    if status_filter:
+        rows = [r for r in rows if r["status"] == status_filter]
+    if search:
+        needle = search.lower()
+        rows = [r for r in rows if needle in r["employee_name"].lower() or needle in r["employee_code"].lower()]
+    return rows
+
+
+@router.get("/board", response_model=list[AttendanceBoardRow])
+def board(
+    day: date | None = None,
+    department_id: int | None = None,
+    status_filter: str | None = Query(None, alias="status"),
+    search: str | None = None,
+    current: CurrentUser = Depends(require_admin_or_hr),
+    db: Session = Depends(get_db),
+):
+    return _board_rows(db, day, department_id, status_filter, search)
+
+
+@router.get("/board/export-csv", response_class=PlainTextResponse)
+def board_csv(
+    day: date | None = None,
+    department_id: int | None = None,
+    status_filter: str | None = Query(None, alias="status"),
+    search: str | None = None,
+    current: CurrentUser = Depends(require_admin_or_hr),
+    db: Session = Depends(get_db),
+):
+    return export_service.attendance_csv(_board_rows(db, day, department_id, status_filter, search))
 
 
 @router.get("/calendar", response_model=list[AttendanceOut])

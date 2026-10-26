@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import api, { apiErrorMessage } from "../../api/client";
+import api, { apiErrorMessage, downloadCsv } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 
 export default function Payroll() {
@@ -88,11 +88,19 @@ export default function Payroll() {
                 <h2 className="font-semibold">
                   {selected.month}/{selected.year} — {selected.status}
                 </h2>
+                <div className="flex items-center gap-3">
+                <button
+                  className="text-sm text-brand underline"
+                  onClick={() => downloadCsv(`/payroll/runs/${selected.id}/export-csv`, `payroll-${selected.month}-${selected.year}.csv`)}
+                >
+                  Export CSV
+                </button>
                 {user?.role === "admin" && selected.status === "draft" && (
                   <button className="bg-brand text-white rounded px-4 py-1.5 text-sm" onClick={() => finalize(selected.id)}>
                     Finalize (locks the month)
                   </button>
                 )}
+                </div>
               </div>
               <table className="w-full text-sm">
                 <thead className="bg-slate-100 text-left">

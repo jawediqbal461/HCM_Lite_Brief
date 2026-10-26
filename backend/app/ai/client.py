@@ -96,7 +96,23 @@ def _chat_openai(db, user, system_prompt, user_message, tool_calls_log):
         if not choice.message.tool_calls:
             return (choice.message.content or "").strip() or "I don't have an answer for that."
 
-        messages.append(choice.message.model_dump())
+        # Only the fields the API actually defines. model_dump() would also carry
+        # nulls like function_call/refusal/audio and a reasoning field on thinking
+        # models; OpenAI ignores those, stricter compatible providers reject them.
+        messages.append(
+            {
+                "role": "assistant",
+                "content": choice.message.content or "",
+                "tool_calls": [
+                    {
+                        "id": c.id,
+                        "type": "function",
+                        "function": {"name": c.function.name, "arguments": c.function.arguments},
+                    }
+                    for c in choice.message.tool_calls
+                ],
+            }
+        )
         for call in choice.message.tool_calls:
             args = json.loads(call.function.arguments or "{}")
             result = run_tool(db, user, call.function.name, args)

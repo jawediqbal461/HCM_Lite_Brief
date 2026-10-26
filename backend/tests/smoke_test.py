@@ -781,4 +781,72 @@ assert csv_report.status_code == 200 and "Employee,Code,Department" in csv_repor
 assert "Omar Siddiqui" in csv_report.text, csv_report.text[:300]
 print("OK report CSV export carries the same rows")
 
+# 38. The follow-up request after a tool call must carry only defined fields.
+# OpenAI ignores stray nulls like function_call/refusal; stricter OpenAI-compatible
+# providers (Groq among them) reject them with a 400, which broke every question
+# that needed a tool while plain chat kept working.
+from app.ai import client as ai_client
+
+sent_messages = {}
+
+
+class _StubFn:
+    def __init__(self):
+        self.name = "get_headcount"
+        self.arguments = "{}"
+
+
+class _StubCall:
+    def __init__(self):
+        self.id = "call_1"
+        self.type = "function"
+        self.function = _StubFn()
+
+
+class _StubMessage:
+    def __init__(self, tool_calls=None, content=None):
+        self.tool_calls = tool_calls
+        self.content = content
+
+    def model_dump(self):  # what the old code used — deliberately noisy
+        return {"role": "assistant", "content": self.content, "function_call": None, "refusal": None, "audio": None}
+
+
+class _StubCompletions:
+    def __init__(self):
+        self.calls = 0
+
+    def create(self, model, messages, tools):
+        self.calls += 1
+        sent_messages[self.calls] = [dict(m) for m in messages]
+        if self.calls == 1:
+            return type("R", (), {"choices": [type("C", (), {"message": _StubMessage(tool_calls=[_StubCall()])})()]})()
+        return type("R", (), {"choices": [type("C", (), {"message": _StubMessage(content="There are 2 active employees.")})()]})()
+
+
+class _StubClient:
+    def __init__(self):
+        self.chat = type("Chat", (), {"completions": _StubCompletions()})()
+
+
+ai_client._openai_client = lambda: _StubClient()
+_previous_provider = ai_client.settings.ai_provider
+ai_client.settings.ai_provider = "openai"
+
+answer, tool_log = ai_client.chat_with_tools(SessionLocal(), hr_user, "system prompt", "How many employees?")
+ai_client.settings.ai_provider = _previous_provider
+
+assert answer == "There are 2 active employees.", answer
+assert tool_log and tool_log[0]["name"] == "get_headcount", tool_log
+
+follow_up = sent_messages[2]
+assistant = next(m for m in follow_up if m["role"] == "assistant")
+assert set(assistant) == {"role", "content", "tool_calls"}, f"stray fields would 400 on Groq: {sorted(assistant)}"
+assert assistant["content"] is not None, "null content is rejected by some providers"
+assert assistant["tool_calls"][0]["function"]["name"] == "get_headcount", assistant["tool_calls"]
+
+tool_reply = next(m for m in follow_up if m["role"] == "tool")
+assert tool_reply["tool_call_id"] == "call_1", tool_reply
+print("OK the tool-call follow-up sends only role/content/tool_calls, with the tool result attached")
+
 print("\nALL SMOKE TESTS PASSED")
